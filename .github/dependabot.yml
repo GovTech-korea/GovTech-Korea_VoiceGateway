@@ -1,0 +1,38 @@
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Seoul
+    open-pull-requests-limit: 5
+    labels:
+      - deps
+    commit-message:
+      prefix: deps
+    groups:
+      # Spring Boot 플러그인과 관리 의존성은 함께 올린다
+      spring-boot:
+        patterns:
+          - org.springframework.boot*
+          - io.spring.dependency-management*
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Seoul
+    labels:
+      - ci
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns:
+          - "*"

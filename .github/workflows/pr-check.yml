@@ -1,0 +1,52 @@
+name: PR Check
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+# checkout에 필요한 읽기 권한만 준다 (artifact 업로드는 GITHUB_TOKEN 권한을 쓰지 않음)
+permissions:
+  contents: read
+
+jobs:
+  branch-flow:
+    name: branch-flow
+    runs-on: ubuntu-latest
+    steps:
+      - name: 브랜치 흐름 검사
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+        run: |
+          if [ "$BASE" = main ]; then
+            if [ "$HEAD" != develop ]; then
+              echo "::error::main으로는 develop에서만 PR을 열 수 있습니다. (현재: $HEAD)"
+              exit 1
+            fi
+          elif ! [[ "$HEAD" =~ ^(feat|update|fix|security|refactor|perf|test|hotfix|docs|build|deps|config|ci|chore|dependabot)/ ]]; then
+            echo "::error::develop으로는 작업 브랜치에서만 PR을 열 수 있습니다. (현재: $HEAD)"
+            exit 1
+          fi
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v6
+      - name: 빌드 및 테스트
+        run: ./gradlew build
+      - name: 테스트·커버리지 리포트 업로드
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports
+          path: |
+            build/reports/tests/
+            build/reports/jacoco/
+          if-no-files-found: ignore
+          retention-days: 14

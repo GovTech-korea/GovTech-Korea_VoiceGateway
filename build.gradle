@@ -1,0 +1,72 @@
+plugins {
+	id 'java'
+	id 'jacoco'
+	id 'org.springframework.boot' version '4.1.1'
+	id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.govtech'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+configurations {
+	mockitoAgent
+}
+
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+	implementation 'org.springframework.boot:spring-boot-starter-websocket'
+	compileOnly 'org.projectlombok:lombok'
+	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+	annotationProcessor 'org.projectlombok:lombok'
+	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
+	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	testImplementation 'org.springframework.boot:spring-boot-starter-websocket-test'
+	testCompileOnly 'org.projectlombok:lombok'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	testAnnotationProcessor 'org.projectlombok:lombok'
+	mockitoAgent('org.mockito:mockito-core') {
+		transitive = false
+	}
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+	// JDK 21+에서 Mockito의 실행 중 self-attach 대신 에이전트로 등록 (https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3)
+	jvmArgumentProviders.add({ ["-javaagent:${configurations.mockitoAgent.singleFile}"] } as CommandLineArgumentProvider)
+	// 에이전트가 bootstrap classpath를 늘려 CDS가 일부 꺼진다는 경고를 없앤다
+	jvmArgs '-Xshare:off'
+	testLogging {
+		events 'failed', 'skipped'
+		exceptionFormat = 'full'
+	}
+}
+
+// 테스트 후 커버리지 리포트 생성: build/reports/jacoco/test/html/index.html
+tasks.named('jacocoTestReport') {
+	dependsOn tasks.named('test')
+	reports {
+		xml.required = true
+		html.required = true
+	}
+}
+
+tasks.named('test') {
+	finalizedBy tasks.named('jacocoTestReport')
+}
+
+// Lombok(1.18.48 포함)이 JDK 25에서 sun.misc.Unsafe 경고를 내므로 컴파일러 프로세스에서만 끈다 (JEP 471, 498)
+tasks.withType(JavaCompile).configureEach {
+	options.fork = true
+	options.forkOptions.jvmArgs.add('--sun-misc-unsafe-memory-access=allow')
+}

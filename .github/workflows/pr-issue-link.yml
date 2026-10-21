@@ -1,0 +1,33 @@
+name: PR Issue Link
+
+on:
+  pull_request:
+    branches: [main, develop]
+    # 본문을 고치면 다시 검사한다
+    types: [opened, edited, synchronize, reopened]
+
+# 이벤트 본문만 읽으므로 GITHUB_TOKEN 권한이 필요 없다
+permissions: {}
+
+jobs:
+  issue-link:
+    name: issue-link
+    runs-on: ubuntu-latest
+    steps:
+      - name: 이슈를 닫는 키워드 검사
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # 예외: develop → main 통합 PR, Dependabot PR
+          if [ "$BASE" = main ] || [[ "$HEAD" == dependabot/* ]]; then
+            echo "검사 대상 아님 ($HEAD → $BASE)"
+            exit 0
+          fi
+          if printf '%s' "$BODY" | grep -Eiq '(close[sd]?|fix(e[sd])?|resolve[sd]?):?[[:space:]]+#[0-9]+'; then
+            printf '%s' "$BODY" | grep -Eio '(close[sd]?|fix(e[sd])?|resolve[sd]?):?[[:space:]]+#[0-9]+'
+            exit 0
+          fi
+          echo "::error::PR 본문에 이 PR이 닫는 이슈를 적어 주세요. 예: Closes #12 (작업 전에 이슈를 먼저 만듭니다)"
+          exit 1
