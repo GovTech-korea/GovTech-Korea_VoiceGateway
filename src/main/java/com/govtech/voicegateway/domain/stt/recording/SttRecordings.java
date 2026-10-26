@@ -63,15 +63,32 @@ public class SttRecordings {
 		if (!enabled() || !NAME.matcher(name).matches()) {
 			return Optional.empty();
 		}
-		Path file = dir().resolve(name);
-		if (!Files.isRegularFile(file)) {
+		return findFile(name).map(this::open);
+	}
+
+	/**
+	 * 요청한 이름으로 경로를 만들지 않고, 기록 폴더의 실제 파일 중 이름이 같은 것을 고른다.
+	 * 이름 검사를 빠져나가는 입력이 있어도 폴더 밖 파일에 닿을 수 없다.
+	 */
+	private Optional<Path> findFile(String name) {
+		if (!Files.isDirectory(dir())) {
 			return Optional.empty();
 		}
+		try (Stream<Path> files = Files.list(dir())) {
+			return files.filter(file -> file.getFileName().toString().equals(name))
+					.filter(Files::isRegularFile)
+					.findFirst();
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+	}
+
+	private Wav open(Path file) {
 		try {
 			long pcmLength = Files.size(file);
 			byte[] header = wavHeader(pcmLength, properties.format().sampleRate());
 			InputStream stream = new SequenceInputStream(new ByteArrayInputStream(header), Files.newInputStream(file));
-			return Optional.of(new Wav(header.length + pcmLength, stream));
+			return new Wav(header.length + pcmLength, stream);
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}
