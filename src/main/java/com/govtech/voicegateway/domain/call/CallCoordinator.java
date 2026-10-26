@@ -25,6 +25,7 @@ import com.govtech.voicegateway.domain.call.message.ServerMessage;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.CallEndReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.RingCancelReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.StatusReason;
+import com.govtech.voicegateway.domain.stt.SttRelay;
 import com.govtech.voicegateway.global.config.VoiceGatewayProperties;
 
 import lombok.RequiredArgsConstructor;
@@ -34,8 +35,9 @@ import lombok.extern.slf4j.Slf4j;
  * 민원인 큐, 상담원 자동 배정, 벨, 통화 연결·종료를 관리한다 (docs/app-integration.md 3절).
  * <p>
  * 상태 변경은 모두 이 객체의 잠금 안에서 일어난다. 음성 프레임은 초당 50개씩 오가므로
- * 잠금 없이 {@link #audioSinks}만 보고 전달한다. 민원인 음성은 통화별 {@link DelayLine}을 거쳐
- * 설정한 시간({@code voicegateway.delay-ms})만큼 늦게 상담원에게 가고, 상담원 음성은 바로 민원인에게 간다.
+ * 잠금 없이 {@link #audioSinks}만 보고 전달한다. 민원인 음성은 받는 즉시 STT로 보내고({@link SttRelay}),
+ * 통화별 {@link DelayLine}을 거쳐 설정한 시간({@code voicegateway.delay-ms})만큼 늦게 상담원에게 간다.
+ * 상담원 음성은 바로 민원인에게 간다.
  */
 @Slf4j
 @Service
@@ -47,6 +49,7 @@ public class CallCoordinator {
 	private final VoiceGatewayProperties properties;
 	private final RingTimer ringTimer;
 	private final DelayLines delayLines;
+	private final SttRelay sttRelay;
 	private final Clock clock;
 
 	private final Map<String, Agent> agentsById = new HashMap<>();
@@ -157,7 +160,13 @@ public class CallCoordinator {
 		DelayLine delayLine = delayLines.open(Duration.ofMillis(properties.delayMs()), agent.connection::sendAudio);
 		call.delayLine = delayLine;
 		delayLinesByCall.put(callId, delayLine);
-		audioSinks.put(call.citizen.id(), frame -> delayLine.offer(frame, delayLines.nowNanos(), clock.millis()));
+		SttRelay.Session stt = sttRelay.open(callId);
+		call.stt = stt;
+		audioSinks.put(call.citizen.id(), frame -> {
+			long receivedAt = clock.millis();
+			delayLine.offer(frame, delayLines.nowNanos(), receivedAt);
+			stt.accept(frame, receivedAt);
+		});
 		audioSinks.put(agent.connection.id(), call.citizen::sendAudio);
 		call.citizen.send(new ServerMessage.Connected(callId, Role.AGENT, 0));
 		agent.connection.send(new ServerMessage.Connected(callId, Role.CITIZEN, properties.delayMs()));
@@ -313,6 +322,7 @@ public class CallCoordinator {
 				audioSinks.remove(call.citizen.id());
 				delayLinesByCall.remove(call.callId);
 				delayLines.close(call.delayLine);
+				call.stt.close();
 				if (agent != null) {
 					audioSinks.remove(agent.connection.id());
 					if (agent.call == call && agentsById.get(agent.agentId) == agent) {
@@ -397,6 +407,7 @@ public class CallCoordinator {
 		private Agent agent;
 		private int notifiedPosition;
 		private DelayLine delayLine;
+		private SttRelay.Session stt;
 
 		private Call(String callId, ClientConnection citizen) {
 			this.callId = callId;
