@@ -7,3 +7,8 @@ voicegateway:
   delay-ms: 800
   # 상담원이 벨을 받지 않으면 다음 상담원에게 넘기는 시간 (ms)
   ring-timeout-ms: 20000
+  stt:
+    # STT로 보내는 형식: PCM16_16K(받은 그대로) | PCM16_8K(16k → 8k 다운샘플)
+    format: PCM16_16K
+    # 지정하면 통화마다 STT로 보낸 바이트를 <callId>.pcm으로 남긴다 (예: build/stt-dump, build/는 git 제외)
+    # dump-dir: build/stt-dump
