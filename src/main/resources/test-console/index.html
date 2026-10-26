@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice Gateway 테스트 콘솔</title>
+<link rel="stylesheet" href="console.css">
+</head>
+<body>
+<header class="top">
+	<div>
+		<h1>Voice Gateway 테스트 콘솔</h1>
+		<p class="sub">브라우저 하나로 민원인과 상담원을 동시에 띄워 대기열·벨·음성 지연·차단·STT 전달을 확인한다.
+			두 역할을 한 화면에서 쓸 때는 <strong>이어폰</strong>을 쓴다 (스피커 소리가 마이크로 다시 들어감).</p>
+	</div>
+	<div class="server">
+		<span class="dot" id="server-dot"></span>
+		<span id="server-text">상태 확인 중</span>
+	</div>
+</header>
+
+<main class="grid">
+	<!-- 상담원 -->
+	<section class="panel" id="agent-panel">
+		<div class="panel-head">
+			<h2>상담원</h2>
+			<span class="badge" id="agent-state">연결 안 됨</span>
+		</div>
+		<div class="row">
+			<label>상담원 ID <input id="agent-id" maxlength="64"></label>
+			<button id="agent-connect" class="primary">접속</button>
+			<button id="agent-disconnect">접속 끊기</button>
+		</div>
+		<div class="row">
+			<button id="agent-ready">대기(READY)</button>
+			<button id="agent-away">자리 비움(AWAY)</button>
+			<label class="check"><input type="checkbox" id="agent-mic"> 내 마이크 보내기</label>
+		</div>
+		<div class="ring" id="agent-ring" hidden>
+			<div>
+				<strong>전화가 왔습니다</strong>
+				<span id="ring-call"></span>
+				<span class="countdown" id="ring-countdown"></span>
+			</div>
+			<div class="row">
+				<button id="agent-accept" class="primary">받기</button>
+				<button id="agent-reject" class="danger">거절</button>
+			</div>
+		</div>
+		<div class="incall" id="agent-incall" hidden>
+			<div class="incall-info">통화 중 <strong id="agent-call"></strong> · 민원인 음성 지연 <strong id="agent-delay"></strong></div>
+			<div class="meter"><div class="meter-fill" id="agent-meter"></div></div>
+			<div class="row">
+				<button id="agent-mute" class="warn" title="단축키 M">위험 구간 차단</button>
+				<button id="agent-hangup" class="danger">끊기</button>
+			</div>
+			<p class="hint">차단은 아직 내 귀에 오지 않은 민원인 음성(지연 버퍼 안)을 무음으로 바꾼다. 실제로는 STT·위험 판단이 부른다.</p>
+		</div>
+		<ol class="log" id="agent-log"></ol>
+	</section>
+
+	<!-- 민원인 -->
+	<section class="panel" id="citizen-panel">
+		<div class="panel-head">
+			<h2>민원인</h2>
+			<span class="badge" id="citizen-state">전화 안 함</span>
+		</div>
+		<div class="row">
+			<label>통화 ID <input id="citizen-call-id" maxlength="64"></label>
+			<button id="citizen-new-id" title="새 통화 ID">새 ID</button>
+		</div>
+		<div class="row">
+			<label>음성
+				<select id="citizen-source">
+					<option value="mic">마이크</option>
+					<option value="tone">테스트 톤 (440Hz, 0.5초 간격)</option>
+					<option value="file">오디오 파일</option>
+				</select>
+			</label>
+			<input type="file" id="citizen-file" accept="audio/*" hidden>
+		</div>
+		<div class="row">
+			<button id="citizen-call" class="primary">전화 걸기</button>
+			<button id="citizen-hangup" class="danger">끊기</button>
+		</div>
+		<div class="meter"><div class="meter-fill" id="citizen-meter"></div></div>
+		<ol class="log" id="citizen-log"></ol>
+	</section>
+
+	<!-- 게이트웨이 상태 -->
+	<section class="panel" id="status-panel">
+		<div class="panel-head">
+			<h2>게이트웨이</h2>
+			<span class="badge" id="status-config"></span>
+		</div>
+		<h3>상담원</h3>
+		<table><thead><tr><th>ID</th><th>상태</th><th>통화</th></tr></thead><tbody id="status-agents"></tbody></table>
+		<h3>대기열</h3>
+		<p id="status-queue" class="mono">비어 있음</p>
+		<h3>통화</h3>
+		<table><thead><tr><th>통화</th><th>상태</th><th>상담원</th><th>STT 전달</th><th>차단</th></tr></thead><tbody id="status-calls"></tbody></table>
+		<h3>STT로 보낸 음성 듣기</h3>
+		<div id="status-dumps" class="dumps"></div>
+	</section>
+</main>
+
+<section class="panel timeline-panel">
+	<div class="panel-head">
+		<h2>타임라인 (최근 10초)</h2>
+		<div class="legend">
+			<span><i class="sw sw-sent"></i>민원인이 보낸 소리</span>
+			<span><i class="sw sw-heard"></i>상담원이 들은 소리</span>
+			<span><i class="sw sw-mute"></i>차단</span>
+		</div>
+	</div>
+	<canvas id="timeline"></canvas>
+	<p class="hint">민원인 줄과 상담원 줄의 간격이 음성 지연이다. 말한 직후 차단을 누르면 상담원 줄의 그 구간이 비어 있다.</p>
+</section>
+
+<script src="console.js"></script>
+</body>
+</html>
