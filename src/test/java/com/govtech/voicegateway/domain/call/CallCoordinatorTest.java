@@ -18,6 +18,11 @@ import com.govtech.voicegateway.domain.call.message.ServerMessage;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.CallEndReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.RingCancelReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.StatusReason;
+import com.govtech.voicegateway.domain.stt.FakeSttGateway;
+import com.govtech.voicegateway.domain.stt.SttAudioFormat;
+import com.govtech.voicegateway.domain.stt.SttChunk;
+import com.govtech.voicegateway.domain.stt.SttProperties;
+import com.govtech.voicegateway.domain.stt.SttRelay;
 import com.govtech.voicegateway.global.config.VoiceGatewayProperties;
 import com.govtech.voicegateway.support.ManualClock;
 
@@ -29,6 +34,7 @@ class CallCoordinatorTest {
 	private FakeRingTimer ringTimer;
 	private ManualClock clock;
 	private DelayLines delayLines;
+	private FakeSttGateway stt;
 	private CallCoordinator coordinator;
 
 	@BeforeEach
@@ -36,7 +42,10 @@ class CallCoordinatorTest {
 		ringTimer = new FakeRingTimer();
 		clock = new ManualClock();
 		delayLines = new DelayLines(clock::nanos);
-		coordinator = new CallCoordinator(new VoiceGatewayProperties(DELAY_MS, RING_TIMEOUT_MS), ringTimer, delayLines, clock);
+		stt = new FakeSttGateway();
+		SttRelay sttRelay = new SttRelay(new SttProperties(SttAudioFormat.PCM16_16K, null), stt);
+		coordinator = new CallCoordinator(new VoiceGatewayProperties(DELAY_MS, RING_TIMEOUT_MS), ringTimer, delayLines,
+				sttRelay, clock);
 	}
 
 	/** 시간을 진행시키고 지연 버퍼에서 때가 된 음성을 내보낸다. */
@@ -333,6 +342,53 @@ class CallCoordinatorTest {
 
 			assertThat(agent.audio).isEmpty();
 			assertThat(coordinator.mute("call-1", null, null)).isEmpty();
+		}
+
+		@Test
+		@DisplayName("민원인 음성은 지연 없이 바로 STT로 가고, 받은 시각·순번·화자가 붙는다")
+		void forwardsCitizenAudioToSttImmediately() {
+			long receivedAt = clock.millis();
+			coordinator.relayAudio(citizen, frame(1));
+			elapse(20);
+			coordinator.relayAudio(citizen, frame(2));
+			coordinator.relayAudio(agent, frame(3));
+
+			assertThat(agent.audio).isEmpty();
+			assertThat(stt.chunks("call-1")).satisfiesExactly(
+					first -> {
+						assertThat(first.pcm()).isEqualTo(frame(1));
+						assertThat(first.sequence()).isZero();
+						assertThat(first.receivedAtEpochMs()).isEqualTo(receivedAt);
+						assertThat(first.speaker()).isEqualTo(Role.CITIZEN);
+					},
+					second -> {
+						assertThat(second.sequence()).isEqualTo(1);
+						assertThat(second.receivedAtEpochMs()).isEqualTo(receivedAt + 20);
+					});
+		}
+
+		@Test
+		@DisplayName("STT 조각의 받은 시각으로 그 구간을 차단할 수 있다")
+		void muteBySttTimestamp() {
+			coordinator.relayAudio(citizen, frame(1));
+			elapse(20);
+			coordinator.relayAudio(citizen, frame(2));
+			SttChunk risky = stt.chunks("call-1").get(1);
+
+			coordinator.mute("call-1", risky.receivedAtEpochMs(), risky.receivedAtEpochMs());
+			elapse(DELAY_MS);
+
+			assertThat(agent.audio).containsExactly(frame(1), new byte[640]);
+		}
+
+		@Test
+		@DisplayName("통화가 끝나면 STT 스트림을 닫고 이후 음성은 보내지 않는다")
+		void closesSttOnHangup() {
+			coordinator.handle(agent, new ClientMessage.Hangup("call-1"));
+			coordinator.relayAudio(citizen, frame(1));
+
+			assertThat(stt.isClosed("call-1")).isTrue();
+			assertThat(stt.chunks("call-1")).isEmpty();
 		}
 
 		@Test
