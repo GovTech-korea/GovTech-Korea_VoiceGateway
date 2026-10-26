@@ -1,8 +1,8 @@
 # 앱 연동 규격: WebSocket 음성
 
-민원인 앱·상담원 앱(Android)과 VOICE_GATEWAY 사이의 음성 연동 규격입니다.
+민원인 앱·상담원 앱(Android)과 VOICE_GATEWAY 사이의 연동 규격입니다.
 
-- 버전: v1 (2026-10-26)
+- 버전: v2 (2026-10-26)
 - 상태: 규격 확정, 게이트웨이 구현 진행 중
 
 ## 1. 전체 구조
@@ -16,8 +16,13 @@
 ```
 
 - 두 앱은 서로 직접 연결하지 않습니다. **모든 음성은 게이트웨이를 거칩니다.**
-- 앱 하나가 통화 하나에 **WebSocket 연결 하나**를 씁니다. 그 연결로 내 음성을 보내고 상대 음성을 받습니다.
-- 민원인 앱과 상담원 앱은 같은 방식으로 연결하고, 접속할 때 보내는 `role` 값만 다릅니다.
+- 민원인은 상담원을 고르지 않습니다. 전화를 걸면 **큐에 들어가고**, 게이트웨이가 **대기 중인 상담원에게 자동 배정**합니다.
+- 배정되면 **상담원 앱에 벨이 울리고**, 상담원이 받아야 연결됩니다.
+
+| 앱 | WebSocket 연결 |
+|---|---|
+| 상담원 앱 | 앱을 켜고 상담 준비를 시작할 때 연결해 **계속 유지**합니다. 여러 통화를 이 연결 하나로 받습니다 |
+| 민원인 앱 | 전화를 걸 때 연결하고, **통화가 끝나면 닫습니다.** 통화 하나에 연결 하나 |
 
 ## 2. 연결 주소
 
@@ -26,25 +31,49 @@
 | 개발 (같은 와이파이의 개발 PC) | `ws://<개발 PC IP>:8080/ws/v1/call` |
 | 배포 | `wss://<서버 도메인>/ws/v1/call` (주소는 배포 시 안내) |
 
-배포 환경에서는 마이크 음성이 오가므로 반드시 `wss://`(암호화)를 씁니다.
+배포 환경에서는 마이크 음성이 오가므로 반드시 `wss://`(암호화)를 씁니다. 상담원 앱과 민원인 앱은 같은 주소를 씁니다.
 
 ## 3. 통화 흐름
 
+### 상담원 앱
+
 ```
-앱                                   게이트웨이
- │── WebSocket 연결 ──────────────────▶│
- │── join (텍스트) ───────────────────▶│  통화 ID·역할·음성 형식 확인
- │◀──────────────────── joined (텍스트) ─│
- │◀─────────────── peer-joined (텍스트) ─│  상대가 들어오면 (이미 있으면 joined에 표시)
- │── 음성 프레임 (바이너리, 20ms마다) ──▶│
- │◀──────── 상대 음성 프레임 (바이너리) ─│
- │◀──────────────── peer-left (텍스트) ─│  상대가 나가면
- │── leave (텍스트) 또는 연결 종료 ──────▶│
+상담원 앱                                 게이트웨이
+ │── 연결 ─────────────────────────────▶│
+ │── register (상담원 ID) ──────────────▶│
+ │◀───────────── registered (READY) ────│   대기 상태가 됨
+ │                ...                    │
+ │◀──────── ringing (통화 ID, 20초) ────│   민원인이 배정됨 → 벨 울림
+ │── accept ───────────────────────────▶│   (거절하면 reject)
+ │◀──────────────────── connected ──────│   음성 시작
+ │◀═══════ 민원인 음성 (약 0.8초 지연) ══│
+ │════════ 상담원 음성 ═════════════════▶│
+ │── hangup ───────────────────────────▶│   (민원인이 끊어도 됨)
+ │◀──────────────────── call-ended ─────│
+ │◀──── status-changed (READY) ─────────│   다시 대기 상태
 ```
 
-- **같은 `callId`로 접속한 민원인 1명과 상담원 1명**이 연결됩니다.
-- 상대가 아직 없어도 음성을 보내도 됩니다. 상대가 없는 동안의 음성은 상대에게 전달되지 않습니다.
-- `callId`를 어떻게 정해 두 앱에 알려줄지는 MVP에서는 앱 쪽에서 정합니다 (예: 상담원 앱이 만든 ID를 민원인 앱에 입력·QR).
+- **20초 안에 받지 않으면** 벨이 멈추고(`ring-cancelled`), 그 상담원은 **AWAY(자리 비움)**가 됩니다. 민원인은 다음 대기 상담원에게 다시 배정됩니다.
+- **거절(`reject`)**하면 바로 다음 대기 상담원에게 넘어갑니다. 거절한 상담원은 READY 상태를 유지합니다.
+- 상담원은 통화 중이 아닐 때 `status`로 READY(대기)·AWAY(자리 비움)를 바꿀 수 있습니다. AWAY인 상담원에게는 배정하지 않습니다.
+
+### 민원인 앱
+
+```
+민원인 앱                                 게이트웨이
+ │── 연결 ─────────────────────────────▶│
+ │── join (통화 ID) ───────────────────▶│   앱이 만든 통화 ID
+ │◀──────────────── queued (순번 1) ────│   대기 상담원이 없으면 대기 (순번이 바뀔 때마다 다시 옴)
+ │◀────────────────── agent-ringing ────│   상담원에게 벨이 울리는 중
+ │◀──────────────────── connected ──────│   음성 시작
+ │════════ 민원인 음성 ═════════════════▶│
+ │◀═══════ 상담원 음성 ═════════════════│
+ │── hangup ───────────────────────────▶│   (대기 중에도 가능)
+ │◀──────────────────── call-ended ─────│   연결 닫기
+```
+
+- 대기 상담원이 있으면 `queued` 없이 바로 `agent-ringing`이 옵니다.
+- 배정 순서: 민원인은 **먼저 온 순서**, 상담원은 **가장 오래 대기한 사람부터**입니다.
 
 ## 4. 음성 형식 (바이너리 메시지)
 
@@ -55,76 +84,77 @@
 | 채널 | **1 (mono)** |
 | 프레임 길이 | **20ms** = 320샘플 = **640바이트** |
 
-- 바이너리 메시지 하나에 **프레임 하나(640바이트)**를 담아 20ms마다 보냅니다.
+- **`connected`를 받은 뒤부터** 바이너리 메시지 하나에 프레임 하나(640바이트)를 담아 20ms마다 보냅니다. 그 전에 보낸 음성은 버립니다.
 - 헤더 없이 음성 바이트만 보냅니다 (WAV 헤더 넣지 않음).
 - 게이트웨이가 보내는 상대 음성도 같은 형식입니다.
-- 지연 구간에서 차단된 부분은 **무음(0으로 채운 바이트)**으로 옵니다. 앱은 따로 처리할 필요 없이 그대로 재생하면 됩니다.
+- 지연 구간에서 차단된 부분은 **무음(0으로 채운 바이트)**으로 옵니다. 앱은 그대로 재생하면 됩니다.
 
 ## 5. 텍스트 메시지 (JSON)
 
-모든 텍스트 메시지에는 `type`이 있습니다.
-
-### 앱 → 게이트웨이
-
-**join** — 연결 직후 한 번
+모든 텍스트 메시지에는 `type`이 있습니다. 공통으로 쓰는 `audio` 값은 v2에서 아래로 고정입니다.
 
 ```json
-{
-  "type": "join",
-  "callId": "call-20261026-0001",
-  "role": "CITIZEN",
-  "audio": {
-    "encoding": "PCM16LE",
-    "sampleRate": 16000,
-    "channels": 1,
-    "frameMs": 20
-  }
-}
+"audio": { "encoding": "PCM16LE", "sampleRate": 16000, "channels": 1, "frameMs": 20 }
 ```
 
-| 필드 | 규칙 |
-|---|---|
-| `callId` | 1~64자, 영문·숫자·`-`·`_` |
-| `role` | `CITIZEN`(민원인) 또는 `AGENT`(상담원) |
-| `audio` | v1은 위 값만 허용 |
+### 상담원 앱 → 게이트웨이
 
-**leave** — 통화를 끝낼 때 (보내지 않고 연결만 끊어도 됩니다)
+| type | 예시 | 보낼 수 있을 때 |
+|---|---|---|
+| `register` | `{"type":"register","role":"AGENT","agentId":"agent-01","audio":{...}}` | 연결 직후 한 번 |
+| `status` | `{"type":"status","state":"AWAY"}` (`READY` / `AWAY`) | 통화 중이 아닐 때 |
+| `accept` | `{"type":"accept","callId":"call-0001"}` | `ringing`을 받은 뒤 |
+| `reject` | `{"type":"reject","callId":"call-0001"}` | `ringing`을 받은 뒤 |
+| `hangup` | `{"type":"hangup","callId":"call-0001"}` | 통화 중 |
+
+- `agentId`: 1~64자, 영문·숫자·`-`·`_`. MVP는 로그인 없이 앱이 정한 값을 그대로 씁니다. 같은 `agentId`로 동시에 두 번 접속할 수 없습니다.
+
+### 민원인 앱 → 게이트웨이
+
+| type | 예시 | 보낼 수 있을 때 |
+|---|---|---|
+| `join` | `{"type":"join","role":"CITIZEN","callId":"call-0001","audio":{...}}` | 연결 직후 한 번 |
+| `hangup` | `{"type":"hangup","callId":"call-0001"}` | 대기 중·통화 중 언제나 |
+
+- `callId`: 민원인 앱이 만듭니다. 1~64자, 영문·숫자·`-`·`_`. 이미 사용 중인 `callId`로는 접속할 수 없습니다 (UUID 사용 권장).
+
+### 게이트웨이 → 상담원 앱
+
+| type | 예시 | 의미 |
+|---|---|---|
+| `registered` | `{"type":"registered","agentId":"agent-01","state":"READY"}` | 등록 완료, 대기 상태 |
+| `status-changed` | `{"type":"status-changed","state":"AWAY","reason":"NO_ANSWER"}` | 상태 변경. reason: `REQUESTED`(내가 바꿈), `NO_ANSWER`(벨 미응답), `CALL_ENDED`(통화 종료 후 READY) |
+| `ringing` | `{"type":"ringing","callId":"call-0001","timeoutMs":20000}` | 벨 울림. `timeoutMs` 안에 accept/reject |
+| `ring-cancelled` | `{"type":"ring-cancelled","callId":"call-0001","reason":"TIMEOUT"}` | 벨 중지. reason: `TIMEOUT`, `CITIZEN_LEFT`(민원인이 끊음) |
+| `connected` | `{"type":"connected","callId":"call-0001","peerRole":"CITIZEN","delayMs":800}` | 통화 연결, 음성 시작. `delayMs`는 민원인 음성 지연 시간 |
+| `call-ended` | `{"type":"call-ended","callId":"call-0001","reason":"HANGUP_CITIZEN"}` | 통화 종료 |
+
+### 게이트웨이 → 민원인 앱
+
+| type | 예시 | 의미 |
+|---|---|---|
+| `queued` | `{"type":"queued","callId":"call-0001","position":2}` | 대기 중. 순번이 바뀔 때마다 다시 옴 |
+| `agent-ringing` | `{"type":"agent-ringing","callId":"call-0001"}` | 상담원에게 연결 중 |
+| `connected` | `{"type":"connected","callId":"call-0001","peerRole":"AGENT","delayMs":0}` | 통화 연결, 음성 시작 |
+| `call-ended` | `{"type":"call-ended","callId":"call-0001","reason":"HANGUP_AGENT"}` | 통화 종료 |
+
+`call-ended`의 reason: `HANGUP_CITIZEN`, `HANGUP_AGENT`, `DISCONNECTED`(상대 연결이 끊김).
+MVP에서는 통화 중 상대 연결이 끊기면 통화를 끝냅니다 (민원인을 다시 큐에 넣지 않음).
+
+### 오류 (양쪽 공통)
 
 ```json
-{ "type": "leave" }
-```
-
-### 게이트웨이 → 앱
-
-**joined** — join 성공
-
-```json
-{ "type": "joined", "callId": "call-20261026-0001", "role": "CITIZEN", "peerConnected": false, "delayMs": 800 }
-```
-
-- `peerConnected`: 상대가 이미 접속해 있으면 `true`
-- `delayMs`: 민원인 → 상담원 음성 지연 시간 (참고용)
-
-**peer-joined / peer-left** — 상대가 들어오거나 나감
-
-```json
-{ "type": "peer-joined", "role": "AGENT" }
-{ "type": "peer-left", "role": "AGENT" }
-```
-
-**error**
-
-```json
-{ "type": "error", "code": "ROLE_TAKEN", "message": "이 통화에 이미 AGENT가 접속해 있습니다" }
+{ "type": "error", "code": "DUPLICATE_AGENT", "message": "agent-01은 이미 접속해 있습니다" }
 ```
 
 | code | 의미 | 연결 |
 |---|---|---|
-| `INVALID_JOIN` | join 형식 오류 (callId·role 규칙 위반, JSON 오류) | 종료 |
+| `INVALID_MESSAGE` | JSON 형식·필드 규칙 위반 (agentId·callId 형식 등) | 종료 |
 | `UNSUPPORTED_AUDIO` | `audio` 값이 규격과 다름 | 종료 |
-| `ROLE_TAKEN` | 같은 통화에 같은 역할이 이미 접속 | 종료 |
-| `NOT_JOINED` | join 전에 음성을 보냄 | 유지 (그 음성은 버림) |
-| `INVALID_FRAME` | 음성 바이트 수가 640이 아님 | 유지 (그 프레임은 버림) |
+| `DUPLICATE_AGENT` | 같은 `agentId`가 이미 접속 중 | 종료 |
+| `DUPLICATE_CALL` | 같은 `callId`가 이미 사용 중 | 종료 |
+| `INVALID_STATE` | 지금 보낼 수 없는 메시지 (예: 벨이 안 울렸는데 accept, 통화 중 status) | 유지 (메시지 무시) |
+| `INVALID_FRAME` | 음성 바이트 수가 640이 아님 | 유지 (프레임 버림) |
 
 "종료"인 오류는 error 메시지를 보낸 뒤 서버가 연결을 닫습니다 (close code 1008).
 
@@ -135,14 +165,14 @@
 ```xml
 <uses-permission android:name="android.permission.INTERNET" />
 <uses-permission android:name="android.permission.RECORD_AUDIO" />
-<!-- 화면이 꺼지거나 앱이 백그라운드일 때도 통화를 유지하려면 (Android 14+) -->
+<!-- 화면이 꺼지거나 앱이 백그라운드일 때도 통화·대기를 유지하려면 (Android 14+) -->
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 ```
 
-`RECORD_AUDIO`는 실행 중에 사용자에게 요청해야 합니다.
+`RECORD_AUDIO`는 실행 중에 사용자에게 요청해야 합니다. 상담원 앱은 대기 중에도 연결을 유지해야 하므로 포그라운드 서비스에서 WebSocket을 관리하는 것을 권장합니다.
 
-### 녹음 (내 음성 → 게이트웨이)
+### 녹음 (내 음성 → 게이트웨이), `connected` 이후
 
 ```kotlin
 val sampleRate = 16_000
@@ -208,29 +238,37 @@ override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
 - 네트워크 사정으로 프레임이 불규칙하게 도착합니다. **3~5프레임(60~100ms)을 모은 뒤 재생을 시작**하면 끊김이 줄어듭니다.
 - 통화 중에는 `AudioManager.mode = AudioManager.MODE_IN_COMMUNICATION`으로 설정합니다.
 
-### 텍스트 메시지 받기
+### 텍스트 메시지 처리 (상담원 앱 예시)
 
 ```kotlin
 override fun onMessage(webSocket: WebSocket, text: String) {
-    when (JSONObject(text).getString("type")) {
-        "joined" -> { /* 녹음 시작 */ }
-        "peer-joined" -> { /* 통화 연결됨 표시 */ }
-        "peer-left" -> { /* 상대 종료 표시 */ }
-        "error" -> { /* code에 따라 처리 */ }
+    val msg = JSONObject(text)
+    when (msg.getString("type")) {
+        "registered" -> showState(msg.getString("state"))
+        "status-changed" -> showState(msg.getString("state"))
+        "ringing" -> showIncomingCall(msg.getString("callId"), msg.getLong("timeoutMs")) // 벨 + 받기/거절 버튼
+        "ring-cancelled" -> dismissIncomingCall()
+        "connected" -> startAudio()        // 녹음·재생 시작
+        "call-ended" -> stopAudio()
+        "error" -> handleError(msg.getString("code"))
     }
 }
 ```
 
 ## 7. 확인 체크리스트
 
-- [ ] join 후 `joined`를 받는다
-- [ ] 같은 callId로 두 앱이 접속하면 양쪽에 상대 접속이 표시된다
+- [ ] 상담원 앱: register 후 `registered(READY)`를 받는다
+- [ ] 민원인 앱: 대기 상담원이 없으면 `queued`, 있으면 `agent-ringing`을 받는다
+- [ ] 상담원 앱에 벨이 울리고, accept하면 양쪽에 `connected`가 온다
+- [ ] 20초 동안 받지 않으면 `ring-cancelled`와 `status-changed(AWAY, NO_ANSWER)`가 온다
 - [ ] 바이너리 메시지가 정확히 640바이트다
 - [ ] 상대 음성이 들린다 (민원인 → 상담원은 약 0.8초 늦게)
+- [ ] 한쪽이 hangup하면 양쪽에 `call-ended`가 오고, 상담원은 다시 READY가 된다
 - [ ] 이어폰 없이 스피커로 통화해도 내 목소리가 상대에게 되돌아가지 않는다 (에코)
 
 ## 8. 변경 이력
 
 | 버전 | 날짜 | 내용 |
 |---|---|---|
-| v1 | 2026-10-26 | 최초 작성 |
+| v2 | 2026-10-26 | 큐·자동 배정·상담원 벨(ringing/accept/reject) 추가. 상담원 앱은 연결 유지(register), 민원인 앱은 통화마다 연결(join). `peer-joined`/`peer-left`/`joined`/`leave` 제거 → `connected`/`call-ended`/`hangup`으로 대체 |
+| v1 | 2026-10-26 | 최초 작성 (같은 callId로 접속한 두 앱을 바로 연결) |
