@@ -1,0 +1,22 @@
+package com.govtech.voicegateway.domain.call;
+
+import com.govtech.voicegateway.domain.call.message.ServerMessage;
+
+/**
+ * 앱 연결 하나. 상담 로직이 WebSocket에 직접 의존하지 않도록 둔 경계다.
+ */
+public interface ClientConnection {
+
+	String id();
+
+	void send(ServerMessage message);
+
+	/** 상대 음성 프레임 (PCM16 LE 16kHz mono 20ms) */
+	void sendAudio(byte[] frame);
+
+	/** 정상 종료 (통화 끝) */
+	void close();
+
+	/** 규격 위반으로 종료 (close code 1008) */
+	void closeForPolicyViolation();
+}
