@@ -55,7 +55,28 @@ git switch develop
 ./gradlew bootRun
 ```
 
-`http://localhost:8080`에서 실행됩니다. 아직 API가 없어 루트 경로는 404를 반환합니다.
+`http://localhost:8080`에서 실행됩니다. 루트 경로(`/`)는 404를 반환합니다.
+
+STT로 보낸 음성을 파일로 남기려면 기록 폴더를 지정해 실행합니다.
+
+```bash
+./gradlew bootRun --args='--voicegateway.stt.dump-dir=build/stt-dump'
+```
+
+## 테스트 콘솔 (앱 없이 시험하기)
+
+실행한 뒤 Chrome에서 **http://localhost:8080/test** 를 엽니다.
+
+1. **상담원** 칸에서 `접속` → "대기 중"
+2. **민원인** 칸에서 음성(마이크 / 테스트 톤 / 오디오 파일)을 고르고 `전화 걸기`
+3. 상담원 칸에 벨이 울리면 `받기` (20초 안에 안 받으면 다음 상담원에게 넘어가고, 안 받은 상담원은 "자리 비움")
+4. 통화 중 `위험 구간 차단`(단축키 M)을 누르면 아직 상담원에게 가지 않은 민원인 음성이 무음이 됩니다
+5. 아래 **타임라인**에서 보낸 소리와 들은 소리의 간격(지연)과 차단 구간을, 오른쪽 **게이트웨이** 칸에서 대기열·통화·STT 전달량을 확인합니다
+
+- 민원인·상담원을 한 화면에서 같이 쓸 때는 **이어폰**을 씁니다. 스피커 소리가 마이크로 다시 들어갑니다.
+- 상담원 여러 명이나 대기열을 보려면 탭을 여러 개 엽니다 (상담원 ID는 탭마다 달라야 합니다).
+- 마이크는 `localhost`나 HTTPS에서만 쓸 수 있습니다. 다른 기기에서 IP로 접속하면 테스트 톤·오디오 파일을 씁니다.
+- `dump-dir`을 지정했으면 "STT로 보낸 음성 듣기"에서 STT가 받은 음성을 그대로 들을 수 있습니다.
 
 ## 빌드와 테스트
 
@@ -74,6 +95,22 @@ git switch develop
 
 - 설정 파일: `src/main/resources/application.yaml`
 - 비밀번호, API 키 같은 비밀값은 저장소에 커밋하지 않고 환경변수로 주입합니다.
+
+| 설정 | 기본값 | 설명 |
+|---|---|---|
+| `voicegateway.delay-ms` | `800` | 민원인 → 상담원 음성 지연 (ms). 0이면 지연 없음 |
+| `voicegateway.ring-timeout-ms` | `20000` | 상담원이 벨을 받지 않으면 다음 상담원에게 넘기는 시간 (ms) |
+| `voicegateway.stt.format` | `PCM16_16K` | STT로 보내는 형식. `PCM16_16K`(받은 그대로) / `PCM16_8K`(8kHz로 다운샘플) |
+| `voicegateway.stt.dump-dir` | 없음 | 지정하면 STT로 보낸 음성을 `<callId>-<시작ms>.pcm`으로 기록 |
+
+| HTTP API | 설명 |
+|---|---|
+| `POST /api/v1/calls/{callId}/mute` | 아직 상담원에게 나가지 않은 민원인 음성을 무음 처리. 본문 `{"fromEpochMs","toEpochMs"}`로 구간 지정 가능 (생략 시 전체) |
+| `GET /api/v1/status` | 설정, 상담원·대기열·통화·STT 전달 현황 |
+| `GET /api/v1/stt/recordings` | STT 기록 목록 (`dump-dir` 지정 시) |
+| `GET /api/v1/stt/recordings/{name}` | STT 기록을 WAV로 받기 |
+
+> 아직 인증이 없습니다. 내부망에서만 띄우세요.
 
 ## IDE
 

@@ -392,6 +392,24 @@ class CallCoordinatorTest {
 		}
 
 		@Test
+		@DisplayName("현황에 통화 중인 상담원·STT 전달량·차단 수가 보인다")
+		void snapshotInCall() {
+			coordinator.relayAudio(citizen, frame(1));
+			coordinator.mute("call-1", null, null);
+			FakeConnection waiting = citizen("call-2");
+
+			CallCenterSnapshot snapshot = coordinator.snapshot();
+
+			assertThat(snapshot.agents()).containsExactly(
+					new CallCenterSnapshot.AgentView("agent-01", AgentState.IN_CALL, "call-1"));
+			assertThat(snapshot.queue()).containsExactly("call-2");
+			assertThat(snapshot.calls()).containsExactly(
+					new CallCenterSnapshot.CallView("call-1", "CONNECTED", "agent-01", clock.millis(), 1, 640, 0, 1, 1),
+					new CallCenterSnapshot.CallView("call-2", "QUEUED", null, null, 0, 0, 0, 0, 0));
+			assertThat(waiting.messages).isNotEmpty();
+		}
+
+		@Test
 		@DisplayName("640바이트가 아닌 프레임은 INVALID_FRAME")
 		void invalidFrame() {
 			assertThatThrownBy(() -> coordinator.relayAudio(citizen, new byte[100]))
