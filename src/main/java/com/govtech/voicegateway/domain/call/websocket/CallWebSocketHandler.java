@@ -33,7 +33,7 @@ public class CallWebSocketHandler extends AbstractWebSocketHandler {
 	private final CallCoordinator coordinator;
 	private final ClientMessageParser parser;
 	private final JsonMapper jsonMapper;
-	private final Map<String, ClientConnection> connections = new ConcurrentHashMap<>();
+	private final Map<String, WebSocketClientConnection> connections = new ConcurrentHashMap<>();
 
 	@Override
 	public void afterConnectionEstablished(WebSocketSession session) {
@@ -65,9 +65,10 @@ public class CallWebSocketHandler extends AbstractWebSocketHandler {
 
 	@Override
 	public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-		ClientConnection connection = connections.remove(session.getId());
+		WebSocketClientConnection connection = connections.remove(session.getId());
 		if (connection != null) {
 			coordinator.disconnected(connection);
+			connection.dispose();
 		}
 	}
 

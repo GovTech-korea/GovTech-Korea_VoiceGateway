@@ -24,6 +24,14 @@ class FakeRingTimer implements RingTimer {
 		});
 	}
 
+	/**
+	 * 취소 여부와 상관없이 index번째 타이머를 실행한다.
+	 * 취소되기 직전에 이미 실행을 시작한 콜백(잠금 대기 중)을 흉내 낼 때 쓴다.
+	 */
+	void runEvenIfCancelled(int index) {
+		scheduled.get(index).task.run();
+	}
+
 	long activeCount() {
 		return scheduled.stream().filter(s -> !s.cancelled && !s.fired).count();
 	}

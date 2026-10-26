@@ -64,6 +64,19 @@ class CallCoordinatorTest {
 		}
 
 		@Test
+		@DisplayName("이미 READY인 상담원이 READY를 다시 보내도 대기 순번을 잃지 않는다")
+		void readyAgainKeepsOrder() {
+			FakeConnection older = agent("agent-old");
+			FakeConnection newer = agent("agent-new");
+			coordinator.handle(older, new ClientMessage.Status(AgentState.READY));
+
+			citizen("call-1");
+
+			assertThat(older.last()).isInstanceOf(ServerMessage.Ringing.class);
+			assertThat(newer.last()).isInstanceOf(ServerMessage.Registered.class);
+		}
+
+		@Test
 		@DisplayName("같은 agentId로 두 번 접속하면 DUPLICATE_AGENT")
 		void duplicateAgent() {
 			agent("agent-01");
@@ -337,6 +350,22 @@ class CallCoordinatorTest {
 		assertThat(second.last()).isEqualTo(new ServerMessage.Ringing("call-1", RING_TIMEOUT_MS));
 		assertThat(citizen.last()).isEqualTo(new ServerMessage.AgentRinging("call-1"));
 		assertThat(ringTimer.activeCount()).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("같은 agentId로 재접속해 새 벨이 울리면, 이전 벨의 늦은 타이머가 새 벨을 끊지 않는다")
+	void staleRingTimerAfterReconnect() {
+		FakeConnection before = agent("agent-01");
+		FakeConnection citizen = citizen("call-1");
+		coordinator.disconnected(before);
+		FakeConnection after = agent("agent-01");
+		assertThat(after.last()).isEqualTo(new ServerMessage.Ringing("call-1", RING_TIMEOUT_MS));
+
+		ringTimer.runEvenIfCancelled(0);
+
+		assertThat(after.all(ServerMessage.RingCancelled.class)).isEmpty();
+		coordinator.handle(after, new ClientMessage.Accept("call-1"));
+		assertThat(citizen.last()).isEqualTo(new ServerMessage.Connected("call-1", Role.AGENT, 0));
 	}
 
 	@Test
