@@ -340,6 +340,22 @@ class CallCoordinatorTest {
 	}
 
 	@Test
+	@DisplayName("같은 agentId로 재접속해 새 벨이 울리면, 이전 벨의 늦은 타이머가 새 벨을 끊지 않는다")
+	void staleRingTimerAfterReconnect() {
+		FakeConnection before = agent("agent-01");
+		FakeConnection citizen = citizen("call-1");
+		coordinator.disconnected(before);
+		FakeConnection after = agent("agent-01");
+		assertThat(after.last()).isEqualTo(new ServerMessage.Ringing("call-1", RING_TIMEOUT_MS));
+
+		ringTimer.runEvenIfCancelled(0);
+
+		assertThat(after.all(ServerMessage.RingCancelled.class)).isEmpty();
+		coordinator.handle(after, new ClientMessage.Accept("call-1"));
+		assertThat(citizen.last()).isEqualTo(new ServerMessage.Connected("call-1", Role.AGENT, 0));
+	}
+
+	@Test
 	@DisplayName("큐에서 기다리던 민원인이 끊으면 뒷사람 순번이 당겨진다")
 	void queuedCitizenLeaves() {
 		FakeConnection first = citizen("call-1");

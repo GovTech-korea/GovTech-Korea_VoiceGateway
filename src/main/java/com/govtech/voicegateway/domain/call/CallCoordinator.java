@@ -143,13 +143,18 @@ public class CallCoordinator {
 		dispatch();
 	}
 
-	void ringTimedOut(String callId, String agentId) {
+	/**
+	 * 벨 타이머 콜백. 콜백이 잠금을 기다리는 사이 같은 agentId로 재접속해 새 벨이 울릴 수 있으므로,
+	 * 문자열이 아니라 벨을 울린 그 상담원 객체인지로 확인한다.
+	 */
+	private void ringTimedOut(String callId, Agent ringingAgent) {
 		synchronized (this) {
 			Call call = callsById.get(callId);
-			if (call == null || call.state != CallState.RINGING || !call.agent.agentId.equals(agentId)) {
+			if (call == null || call.state != CallState.RINGING || call.agent != ringingAgent) {
 				return;
 			}
 			Agent agent = call.agent;
+			String agentId = agent.agentId;
 			agent.ringTimeout = null;
 			agent.call = null;
 			agent.state = AgentState.AWAY;
@@ -232,10 +237,9 @@ public class CallCoordinator {
 		agent.connection.send(new ServerMessage.Ringing(call.callId, properties.ringTimeoutMs()));
 		call.citizen.send(new ServerMessage.AgentRinging(call.callId));
 		String callId = call.callId;
-		String agentId = agent.agentId;
 		agent.ringTimeout = ringTimer.schedule(Duration.ofMillis(properties.ringTimeoutMs()),
-				() -> ringTimedOut(callId, agentId));
-		log.info("벨: {} → {}", callId, agentId);
+				() -> ringTimedOut(callId, agent));
+		log.info("벨: {} → {}", callId, agent.agentId);
 	}
 
 	/** 순번이 바뀐 대기 민원인에게만 queued를 보낸다. */
