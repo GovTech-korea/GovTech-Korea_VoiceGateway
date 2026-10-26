@@ -64,6 +64,19 @@ class CallCoordinatorTest {
 		}
 
 		@Test
+		@DisplayName("이미 READY인 상담원이 READY를 다시 보내도 대기 순번을 잃지 않는다")
+		void readyAgainKeepsOrder() {
+			FakeConnection older = agent("agent-old");
+			FakeConnection newer = agent("agent-new");
+			coordinator.handle(older, new ClientMessage.Status(AgentState.READY));
+
+			citizen("call-1");
+
+			assertThat(older.last()).isInstanceOf(ServerMessage.Ringing.class);
+			assertThat(newer.last()).isInstanceOf(ServerMessage.Registered.class);
+		}
+
+		@Test
 		@DisplayName("같은 agentId로 두 번 접속하면 DUPLICATE_AGENT")
 		void duplicateAgent() {
 			agent("agent-01");

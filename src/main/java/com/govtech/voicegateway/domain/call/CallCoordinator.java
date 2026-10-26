@@ -110,7 +110,10 @@ public class CallCoordinator {
 			throw new ProtocolException(ErrorCode.INVALID_STATE, "벨이 울리거나 통화 중에는 상태를 바꿀 수 없습니다");
 		}
 		if (state == AgentState.READY) {
-			becomeReady(agent);
+			// 이미 READY면 대기 순번을 그대로 둔다 (다시 보냈다고 맨 뒤로 밀리지 않게)
+			if (agent.state != AgentState.READY) {
+				becomeReady(agent);
+			}
 		} else {
 			agent.state = AgentState.AWAY;
 		}
