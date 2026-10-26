@@ -22,15 +22,19 @@ public class SttRelay {
 		return new Session(callId, properties.format(), gateway.open(callId, properties.format()));
 	}
 
-	/** 통화 하나의 전달 세션. 한 연결의 프레임은 차례로 들어오지만, 종료는 다른 스레드에서 올 수 있어 잠근다. */
+	/**
+	 * 통화 하나의 전달 세션. 한 연결의 프레임은 차례로 들어오지만, 종료는 다른 스레드에서 올 수 있어 잠근다.
+	 * 집계 값은 잠금 없이 읽게 volatile로 둔다 (현황 조회가 느린 STT 전송을 기다리지 않게).
+	 */
 	public static final class Session {
 
 		private final String callId;
 		private final SttAudioFormat format;
 		private final SttStream stream;
 		private final Pcm16Downsampler downsampler;
-		private long sequence;
-		private long failures;
+		private volatile long sequence;
+		private volatile long bytes;
+		private volatile long failures;
 		private boolean closed;
 
 		private Session(String callId, SttAudioFormat format, SttStream stream) {
@@ -46,14 +50,33 @@ public class SttRelay {
 				return;
 			}
 			byte[] pcm = downsampler == null ? pcm16k : downsampler.process(pcm16k);
+			long seq = sequence;
+			sequence = seq + 1; // 잠금 안에서만 쓰므로 volatile 증가가 안전하다
 			try {
-				stream.send(new SttChunk(callId, Role.CITIZEN, sequence++, receivedAtEpochMs, format, pcm));
+				stream.send(new SttChunk(callId, Role.CITIZEN, seq, receivedAtEpochMs, format, pcm));
+				bytes = bytes + pcm.length;
 			} catch (RuntimeException e) {
 				// STT 장애가 상담 통화를 끊으면 안 된다. 조각은 버리고 순번은 건너뛴 채로 둔다
-				if (failures++ == 0) {
+				failures = failures + 1;
+				if (failures == 1) {
 					log.warn("STT 전달 실패: {} (이후 같은 통화의 실패는 종료 때 개수만 남김)", callId, e);
 				}
 			}
+		}
+
+		/** 넘긴 조각 수 (실패 포함, 다음 순번과 같다) */
+		public long chunkCount() {
+			return sequence;
+		}
+
+		/** 전달에 성공한 바이트 수 (변환 후) */
+		public long byteCount() {
+			return bytes;
+		}
+
+		/** 전달에 실패한 조각 수 */
+		public long failureCount() {
+			return failures;
 		}
 
 		public synchronized void close() {

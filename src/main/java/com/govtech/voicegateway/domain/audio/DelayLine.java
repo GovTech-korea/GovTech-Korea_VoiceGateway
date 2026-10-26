@@ -27,6 +27,7 @@ public final class DelayLine {
 	private final Deque<Frame> pending = new ArrayDeque<>();
 	private boolean closed;
 	private long dropped;
+	private long mutedTotal;
 
 	public DelayLine(Duration delay, AudioSink target) {
 		this.delayNanos = delay.toNanos();
@@ -75,6 +76,7 @@ public final class DelayLine {
 				muted++;
 			}
 		}
+		mutedTotal += muted;
 		return muted;
 	}
 
@@ -91,6 +93,11 @@ public final class DelayLine {
 
 	public synchronized int pendingCount() {
 		return pending.size();
+	}
+
+	/** 지금까지 무음 처리한 프레임 수 */
+	public synchronized long mutedCount() {
+		return mutedTotal;
 	}
 
 	/** 상한을 넘어 버린 프레임 수 */

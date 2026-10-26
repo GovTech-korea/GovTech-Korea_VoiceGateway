@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -105,6 +106,35 @@ public class CallCoordinator {
 		return OptionalInt.of(muted);
 	}
 
+	/** 테스트 콘솔·운영 확인용 현재 상태 */
+	public synchronized CallCenterSnapshot snapshot() {
+		List<CallCenterSnapshot.AgentView> agents = agentsById.values().stream()
+				.sorted(Comparator.comparing(agent -> agent.agentId))
+				.map(agent -> new CallCenterSnapshot.AgentView(agent.agentId, agent.state,
+						agent.call == null ? null : agent.call.callId))
+				.toList();
+		List<String> queued = queue.stream().map(call -> call.callId).toList();
+		List<CallCenterSnapshot.CallView> calls = callsById.values().stream()
+				.sorted(Comparator.comparing(call -> call.callId))
+				.map(CallCoordinator::view)
+				.toList();
+		return new CallCenterSnapshot(agents, queued, calls);
+	}
+
+	private static CallCenterSnapshot.CallView view(Call call) {
+		boolean connected = call.state == CallState.CONNECTED;
+		return new CallCenterSnapshot.CallView(
+				call.callId,
+				call.state.name(),
+				call.agent == null ? null : call.agent.agentId,
+				connected ? call.connectedAtEpochMs : null,
+				connected ? call.stt.chunkCount() : 0,
+				connected ? call.stt.byteCount() : 0,
+				connected ? call.stt.failureCount() : 0,
+				connected ? call.delayLine.mutedCount() : 0,
+				connected ? call.delayLine.pendingCount() : 0);
+	}
+
 	public synchronized void disconnected(ClientConnection connection) {
 		Agent agent = agentsByConnection.remove(connection.id());
 		if (agent != null) {
@@ -162,6 +192,7 @@ public class CallCoordinator {
 		delayLinesByCall.put(callId, delayLine);
 		SttRelay.Session stt = sttRelay.open(callId);
 		call.stt = stt;
+		call.connectedAtEpochMs = clock.millis();
 		audioSinks.put(call.citizen.id(), frame -> {
 			long receivedAt = clock.millis();
 			delayLine.offer(frame, delayLines.nowNanos(), receivedAt);
@@ -408,6 +439,7 @@ public class CallCoordinator {
 		private int notifiedPosition;
 		private DelayLine delayLine;
 		private SttRelay.Session stt;
+		private long connectedAtEpochMs;
 
 		private Call(String callId, ClientConnection citizen) {
 			this.callId = callId;
