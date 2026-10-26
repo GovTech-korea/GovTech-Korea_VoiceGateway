@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import com.govtech.voicegateway.domain.audio.DelayLines;
 import com.govtech.voicegateway.domain.call.message.ClientMessage;
 import com.govtech.voicegateway.domain.call.message.ErrorCode;
 import com.govtech.voicegateway.domain.call.message.ProtocolException;
@@ -18,6 +19,7 @@ import com.govtech.voicegateway.domain.call.message.ServerMessage.CallEndReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.RingCancelReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.StatusReason;
 import com.govtech.voicegateway.global.config.VoiceGatewayProperties;
+import com.govtech.voicegateway.support.ManualClock;
 
 class CallCoordinatorTest {
 
@@ -25,12 +27,22 @@ class CallCoordinatorTest {
 	private static final long RING_TIMEOUT_MS = 20_000;
 
 	private FakeRingTimer ringTimer;
+	private ManualClock clock;
+	private DelayLines delayLines;
 	private CallCoordinator coordinator;
 
 	@BeforeEach
 	void setUp() {
 		ringTimer = new FakeRingTimer();
-		coordinator = new CallCoordinator(new VoiceGatewayProperties(DELAY_MS, RING_TIMEOUT_MS), ringTimer);
+		clock = new ManualClock();
+		delayLines = new DelayLines(clock::nanos);
+		coordinator = new CallCoordinator(new VoiceGatewayProperties(DELAY_MS, RING_TIMEOUT_MS), ringTimer, delayLines, clock);
+	}
+
+	/** 시간을 진행시키고 지연 버퍼에서 때가 된 음성을 내보낸다. */
+	private void elapse(long millis) {
+		clock.advance(Duration.ofMillis(millis));
+		delayLines.drainAll();
 	}
 
 	private FakeConnection agent(String agentId) {
@@ -269,13 +281,58 @@ class CallCoordinatorTest {
 		}
 
 		@Test
-		@DisplayName("음성 프레임을 서로에게 전달한다")
-		void relaysAudio() {
+		@DisplayName("상담원 음성은 바로, 민원인 음성은 지연 시간(800ms) 뒤에 상대에게 간다")
+		void relaysAudioWithCitizenDelay() {
 			coordinator.relayAudio(citizen, frame(1));
 			coordinator.relayAudio(agent, frame(2));
 
-			assertThat(agent.audio).containsExactly(frame(1));
 			assertThat(citizen.audio).containsExactly(frame(2));
+			elapse(DELAY_MS - 1);
+			assertThat(agent.audio).isEmpty();
+			elapse(1);
+			assertThat(agent.audio).containsExactly(frame(1));
+		}
+
+		@Test
+		@DisplayName("차단하면 아직 상담원에게 나가지 않은 민원인 음성이 무음으로 간다")
+		void mutePending() {
+			coordinator.relayAudio(citizen, frame(1));
+			elapse(20);
+			coordinator.relayAudio(citizen, frame(2));
+
+			assertThat(coordinator.mute("call-1", null, null)).hasValue(2);
+			elapse(DELAY_MS);
+
+			assertThat(agent.audio).containsExactly(new byte[640], new byte[640]);
+		}
+
+		@Test
+		@DisplayName("구간을 지정하면 그 시각에 받은 민원인 음성만 무음이 된다")
+		void muteRange() {
+			long first = clock.millis();
+			coordinator.relayAudio(citizen, frame(1));
+			elapse(20);
+			long second = clock.millis();
+			coordinator.relayAudio(citizen, frame(2));
+			elapse(20);
+			coordinator.relayAudio(citizen, frame(3));
+
+			assertThat(coordinator.mute("call-1", second, second)).hasValue(1);
+			elapse(DELAY_MS);
+
+			assertThat(first).isLessThan(second);
+			assertThat(agent.audio).containsExactly(frame(1), new byte[640], frame(3));
+		}
+
+		@Test
+		@DisplayName("통화가 끝나면 지연 중이던 민원인 음성은 버린다")
+		void dropsPendingOnHangup() {
+			coordinator.relayAudio(citizen, frame(1));
+			coordinator.handle(citizen, new ClientMessage.Hangup("call-1"));
+			elapse(DELAY_MS);
+
+			assertThat(agent.audio).isEmpty();
+			assertThat(coordinator.mute("call-1", null, null)).isEmpty();
 		}
 
 		@Test

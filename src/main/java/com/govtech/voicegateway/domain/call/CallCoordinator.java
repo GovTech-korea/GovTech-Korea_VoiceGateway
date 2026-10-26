@@ -1,5 +1,6 @@
 package com.govtech.voicegateway.domain.call;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Comparator;
@@ -8,11 +9,15 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.stereotype.Service;
 
+import com.govtech.voicegateway.domain.audio.AudioSink;
+import com.govtech.voicegateway.domain.audio.DelayLine;
+import com.govtech.voicegateway.domain.audio.DelayLines;
 import com.govtech.voicegateway.domain.call.message.ClientMessage;
 import com.govtech.voicegateway.domain.call.message.ErrorCode;
 import com.govtech.voicegateway.domain.call.message.ProtocolException;
@@ -29,7 +34,8 @@ import lombok.extern.slf4j.Slf4j;
  * 민원인 큐, 상담원 자동 배정, 벨, 통화 연결·종료를 관리한다 (docs/app-integration.md 3절).
  * <p>
  * 상태 변경은 모두 이 객체의 잠금 안에서 일어난다. 음성 프레임은 초당 50개씩 오가므로
- * 잠금 없이 {@link #audioPeers}만 보고 상대에게 전달한다.
+ * 잠금 없이 {@link #audioSinks}만 보고 전달한다. 민원인 음성은 통화별 {@link DelayLine}을 거쳐
+ * 설정한 시간({@code voicegateway.delay-ms})만큼 늦게 상담원에게 가고, 상담원 음성은 바로 민원인에게 간다.
  */
 @Slf4j
 @Service
@@ -40,14 +46,18 @@ public class CallCoordinator {
 
 	private final VoiceGatewayProperties properties;
 	private final RingTimer ringTimer;
+	private final DelayLines delayLines;
+	private final Clock clock;
 
 	private final Map<String, Agent> agentsById = new HashMap<>();
 	private final Map<String, Agent> agentsByConnection = new HashMap<>();
 	private final Map<String, Call> callsById = new HashMap<>();
 	private final Map<String, Call> callsByCitizenConnection = new HashMap<>();
 	private final Deque<Call> queue = new ArrayDeque<>();
-	/** 연결 ID → 통화 상대 연결. 통화 중(connected)인 동안만 들어 있다. */
-	private final Map<String, ClientConnection> audioPeers = new ConcurrentHashMap<>();
+	/** 연결 ID → 그 연결이 보낸 음성을 받을 곳. 통화 중(connected)인 동안만 들어 있다. */
+	private final Map<String, AudioSink> audioSinks = new ConcurrentHashMap<>();
+	/** 통화 ID → 민원인 음성 지연 버퍼. 통화 중인 동안만 들어 있다. */
+	private final Map<String, DelayLine> delayLinesByCall = new ConcurrentHashMap<>();
 	private long readyOrder;
 
 	public synchronized void handle(ClientConnection connection, ClientMessage message) {
@@ -69,10 +79,27 @@ public class CallCoordinator {
 			throw new ProtocolException(ErrorCode.INVALID_FRAME,
 					"음성 프레임은 640바이트여야 합니다 (받은 크기: " + frame.length + ")");
 		}
-		ClientConnection peer = audioPeers.get(from.id());
-		if (peer != null) {
-			peer.sendAudio(frame);
+		AudioSink sink = audioSinks.get(from.id());
+		if (sink != null) {
+			sink.accept(frame);
 		}
+	}
+
+	/**
+	 * 통화 중인 민원인 음성 중 아직 상담원에게 나가지 않은 구간을 무음으로 바꾼다.
+	 * 구간을 주지 않으면(null) 그쪽 끝은 제한하지 않는다.
+	 *
+	 * @return 무음 처리한 프레임 수. 통화 중인 callId가 아니면 비어 있다
+	 */
+	public OptionalInt mute(String callId, Long fromEpochMs, Long toEpochMs) {
+		DelayLine line = delayLinesByCall.get(callId);
+		if (line == null) {
+			return OptionalInt.empty();
+		}
+		int muted = line.mute(fromEpochMs == null ? Long.MIN_VALUE : fromEpochMs,
+				toEpochMs == null ? Long.MAX_VALUE : toEpochMs);
+		log.info("음성 차단: {} {}프레임 [{} ~ {}]", callId, muted, fromEpochMs, toEpochMs);
+		return OptionalInt.of(muted);
 	}
 
 	public synchronized void disconnected(ClientConnection connection) {
@@ -127,8 +154,11 @@ public class CallCoordinator {
 		cancelRing(agent);
 		call.state = CallState.CONNECTED;
 		agent.state = AgentState.IN_CALL;
-		audioPeers.put(call.citizen.id(), agent.connection);
-		audioPeers.put(agent.connection.id(), call.citizen);
+		DelayLine delayLine = delayLines.open(Duration.ofMillis(properties.delayMs()), agent.connection::sendAudio);
+		call.delayLine = delayLine;
+		delayLinesByCall.put(callId, delayLine);
+		audioSinks.put(call.citizen.id(), frame -> delayLine.offer(frame, delayLines.nowNanos(), clock.millis()));
+		audioSinks.put(agent.connection.id(), call.citizen::sendAudio);
 		call.citizen.send(new ServerMessage.Connected(callId, Role.AGENT, 0));
 		agent.connection.send(new ServerMessage.Connected(callId, Role.CITIZEN, properties.delayMs()));
 		log.info("통화 연결: {} ↔ {}", callId, agent.agentId);
@@ -280,9 +310,11 @@ public class CallCoordinator {
 				agent.connection.send(new ServerMessage.RingCancelled(call.callId, RingCancelReason.CITIZEN_LEFT));
 			}
 			case CONNECTED -> {
-				audioPeers.remove(call.citizen.id());
+				audioSinks.remove(call.citizen.id());
+				delayLinesByCall.remove(call.callId);
+				delayLines.close(call.delayLine);
 				if (agent != null) {
-					audioPeers.remove(agent.connection.id());
+					audioSinks.remove(agent.connection.id());
 					if (agent.call == call && agentsById.get(agent.agentId) == agent) {
 						agent.call = null;
 						becomeReady(agent);
@@ -364,6 +396,7 @@ public class CallCoordinator {
 		private CallState state = CallState.QUEUED;
 		private Agent agent;
 		private int notifiedPosition;
+		private DelayLine delayLine;
 
 		private Call(String callId, ClientConnection citizen) {
 			this.callId = callId;
