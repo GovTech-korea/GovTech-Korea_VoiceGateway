@@ -47,7 +47,7 @@ class StatusControllerTest {
 		given(coordinator.snapshot()).willReturn(new CallCenterSnapshot(
 				List.of(new CallCenterSnapshot.AgentView("agent-01", AgentState.IN_CALL, "call-1")),
 				List.of("call-2"),
-				List.of(new CallCenterSnapshot.CallView("call-1", "CONNECTED", "agent-01", 1_000L, 50, 16_000, 0, 3, 40))));
+				List.of(new CallCenterSnapshot.CallView("call-1", "CONNECTED", "agent-01", 1_000L, 50, 16_000, 0, 3, true, 40))));
 
 		mockMvc.perform(get("/api/v1/status"))
 				.andExpect(status().isOk())
@@ -57,6 +57,7 @@ class StatusControllerTest {
 				.andExpect(jsonPath("$.agents[0].state").value("IN_CALL"))
 				.andExpect(jsonPath("$.queue[0]").value("call-2"))
 				.andExpect(jsonPath("$.calls[0].sttBytes").value(16_000))
-				.andExpect(jsonPath("$.calls[0].mutedFrames").value(3));
+				.andExpect(jsonPath("$.calls[0].mutedFrames").value(3))
+				.andExpect(jsonPath("$.calls[0].muteHold").value(true));
 	}
 }

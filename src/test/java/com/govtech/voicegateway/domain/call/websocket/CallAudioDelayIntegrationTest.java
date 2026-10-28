@@ -71,6 +71,36 @@ class CallAudioDelayIntegrationTest {
 		citizen.close();
 	}
 
+	@Test
+	@DisplayName("차단 유지 API를 켜 두면 그동안 보낸 민원인 음성이 상담원에게 무음으로 가고, 끄면 다시 들린다")
+	void holdThroughApi() throws Exception {
+		WsTestClient[] call = WsTestClient.connectCall(port, "hold-agent", "hold-call");
+		WsTestClient agent = call[0];
+		WsTestClient citizen = call[1];
+		assertThat(putHold("no-such-call", true).statusCode()).isEqualTo(404); // 예열
+
+		assertThat(putHold("hold-call", true).statusCode()).isEqualTo(200);
+		citizen.sendBinary(filled(5));
+		Thread.sleep(50);
+		assertThat(putHold("hold-call", false).body()).contains("\"hold\":false");
+		citizen.sendBinary(filled(6));
+
+		assertThat(agent.nextBinary()).isEqualTo(new byte[640]);
+		assertThat(agent.nextBinary()).isEqualTo(filled(6));
+
+		agent.close();
+		citizen.close();
+	}
+
+	private HttpResponse<String> putHold(String callId, boolean hold) throws Exception {
+		return HttpClient.newHttpClient().send(
+				HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/calls/" + callId + "/mute-hold"))
+						.header("Content-Type", "application/json")
+						.PUT(HttpRequest.BodyPublishers.ofString("{\"hold\":" + hold + "}"))
+						.build(),
+				HttpResponse.BodyHandlers.ofString());
+	}
+
 	private HttpResponse<String> postMute(String callId) throws Exception {
 		return HttpClient.newHttpClient().send(
 				HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/calls/" + callId + "/mute"))

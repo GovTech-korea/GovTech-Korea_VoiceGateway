@@ -404,9 +404,32 @@ class CallCoordinatorTest {
 					new CallCenterSnapshot.AgentView("agent-01", AgentState.IN_CALL, "call-1"));
 			assertThat(snapshot.queue()).containsExactly("call-2");
 			assertThat(snapshot.calls()).containsExactly(
-					new CallCenterSnapshot.CallView("call-1", "CONNECTED", "agent-01", clock.millis(), 1, 640, 0, 1, 1),
-					new CallCenterSnapshot.CallView("call-2", "QUEUED", null, null, 0, 0, 0, 0, 0));
+					new CallCenterSnapshot.CallView("call-1", "CONNECTED", "agent-01", clock.millis(), 1, 640, 0, 1, false, 1),
+					new CallCenterSnapshot.CallView("call-2", "QUEUED", null, null, 0, 0, 0, 0, false, 0));
 			assertThat(waiting.messages).isNotEmpty();
+		}
+
+		@Test
+		@DisplayName("차단 유지 중에는 상담원에게 무음만 가고 STT에는 원본이 가며, 끄면 다시 들린다")
+		void holdMute() {
+			coordinator.relayAudio(citizen, frame(1));
+			assertThat(coordinator.holdMute("call-1", true)).hasValue(1);
+			coordinator.relayAudio(citizen, frame(2));
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isTrue();
+
+			coordinator.holdMute("call-1", false);
+			coordinator.relayAudio(citizen, frame(3));
+			elapse(DELAY_MS);
+
+			assertThat(agent.audio).containsExactly(new byte[640], new byte[640], frame(3));
+			assertThat(stt.chunks("call-1")).extracting(SttChunk::pcm).containsExactly(frame(1), frame(2), frame(3));
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isFalse();
+		}
+
+		@Test
+		@DisplayName("통화 중이 아닌 callId의 차단 유지는 비어 있다")
+		void holdMuteUnknownCall() {
+			assertThat(coordinator.holdMute("none", true)).isEmpty();
 		}
 
 		@Test
