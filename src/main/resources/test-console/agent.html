@@ -31,7 +31,7 @@
 			<li><span>이름을 정하고 <strong>접속</strong> → 대기 중</span></li>
 			<li><span>민원인이 걸면 전화 수신 화면이 뜹니다. <strong>20초 안에 받기</strong></span></li>
 			<li><span>민원인 목소리는 <strong><span id="delay-ms">0.8초</span> 늦게</strong> 들립니다</span></li>
-			<li><span>위험한 말이 나오면 바로 <strong>위험 구간 차단</strong> (키보드 M). 아직 안 들린 부분이 지워집니다</span></li>
+			<li><span>위험한 말이 나오면 <strong>위험 구간 차단</strong> (키보드 M). 아직 안 들린 말부터 <strong>해제할 때까지</strong> 계속 막힙니다. 다시 누르면 해제</span></li>
 		</ol>
 		<a class="back" href="index.html">← 역할 다시 고르기</a>
 		<details class="devlog"><summary>개발자용 메시지 기록</summary><ol class="log" id="agent-log"></ol></details>
@@ -107,7 +107,12 @@
 					<canvas id="timeline" role="img" aria-label="최근 10초 동안 들은 소리의 크기와 차단 구간"></canvas>
 				</div>
 				<div class="meter"><div class="meter-fill" id="agent-meter"></div></div>
-				<button class="btn btn-warn btn-block mute-btn" id="agent-mute"><svg width="22" height="22"><use href="#i-mute"/></svg>위험 구간 차단 <span class="kbd">M</span></button>
+				<button class="btn btn-block mute-btn" id="agent-hold" aria-pressed="false">
+					<svg width="22" height="22"><use href="#i-mute"/></svg>
+					<span class="hold-off">위험 구간 차단</span><span class="hold-on">차단 중 · 눌러서 해제</span>
+					<span class="kbd">M</span>
+				</button>
+				<p class="hint center hold-hint"><span class="hold-off">누르면 아직 안 들린 말부터 계속 막아요. 다시 누르면 해제</span><span class="hold-on">민원인 목소리가 들리지 않는 중이에요</span></p>
 				<div class="call-bottom">
 					<label class="switch"><input type="checkbox" id="agent-mic" checked> 내 목소리 보내기</label>
 					<div><button class="round round-red" id="agent-hangup" aria-label="끊기"><svg width="24" height="24" style="transform:rotate(135deg)"><use href="#i-phone"/></svg></button></div>

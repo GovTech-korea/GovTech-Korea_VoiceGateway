@@ -133,4 +133,55 @@ class DelayLineTest {
 
 		assertThat(received).isEmpty();
 	}
+
+	@Test
+	@DisplayName("차단 유지를 켜면 대기 중인 프레임과 그 뒤에 들어오는 프레임이 모두 무음, 끄면 다시 원래 소리")
+	void holdMutesUntilReleased() {
+		line.offer(frame(1), 0, 1000);
+
+		assertThat(line.setHold(true)).isEqualTo(1);
+		line.offer(frame(2), 20 * MS, 1020);
+		line.offer(frame(3), 40 * MS, 1040);
+		assertThat(line.setHold(false)).isZero();
+		line.offer(frame(4), 60 * MS, 1060);
+		line.drain(1000 * MS);
+
+		assertThat(received).containsExactly(new byte[640], new byte[640], new byte[640], frame(4));
+		assertThat(line.mutedCount()).isEqualTo(3);
+		assertThat(line.isHold()).isFalse();
+	}
+
+	@Test
+	@DisplayName("지연이 0이어도 차단 유지 중에는 무음으로 내보낸다")
+	void holdWithZeroDelay() {
+		DelayLine direct = new DelayLine(Duration.ZERO, received::add);
+		direct.setHold(true);
+
+		direct.offer(frame(1), 0, 1000);
+
+		assertThat(received).containsExactly(new byte[640]);
+	}
+
+	@Test
+	@DisplayName("차단 유지를 다시 켜거나 그 중에 한 번 차단해도 이미 무음인 프레임은 다시 세지 않는다")
+	void holdDoesNotDoubleCount() {
+		line.setHold(true);
+		line.offer(frame(1), 0, 1000);
+
+		assertThat(line.setHold(true)).isZero();
+		assertThat(line.muteAll()).isZero();
+		assertThat(line.mutedCount()).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("차단 유지 중 상한을 넘어 버린 프레임은 무음 수에 들어가지 않는다")
+	void droppedNotCountedAsMuted() {
+		line.setHold(true);
+		for (int i = 0; i < 80 + 3; i++) {
+			line.offer(frame(1), 0, 1000);
+		}
+
+		assertThat(line.mutedCount()).isEqualTo(80);
+		assertThat(line.droppedCount()).isEqualTo(3);
+	}
 }

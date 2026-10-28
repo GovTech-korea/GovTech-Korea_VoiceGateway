@@ -330,7 +330,7 @@ function randomId(prefix) {
 const timeline = {
 	sent: [], // [ms, level]
 	heard: [],
-	mutes: [], // ms
+	mutes: [], // { start, end } (ms). 한 번 차단은 start = end, 차단 유지 중이면 end = null
 	add(list, value) {
 		const now = performance.now();
 		list.push([now, value]);
@@ -376,13 +376,18 @@ function drawTimeline() {
 		g.fillText(s === 0 ? '지금' : `-${s}s`, Math.min(px + 3, width - 26), height - 4);
 	}
 
-	// 차단 표시: 누르기 전 지연 시간 동안 보낸 소리(아직 버퍼에 있던 것)가, 누른 뒤 지연 시간 동안 상담원에게 무음으로 간다
+	// 차단 표시: 누르기 전 지연 시간 동안 보낸 소리(아직 버퍼에 있던 것)부터 해제할 때까지 보낸 소리가,
+	// 누른 때부터 해제한 뒤 지연 시간까지 상담원에게 무음으로 간다
 	g.fillStyle = color('--mute');
 	const delay = state.delayMs || 0;
-	const bandWidth = Math.max(2, (delay / TIMELINE_MS) * width);
-	timeline.mutes = timeline.mutes.filter((t) => t > now - TIMELINE_MS - delay);
-	for (const t of timeline.mutes) {
-		rows.forEach((row, i) => g.fillRect(x(t + row.muteShift * delay), i * rowHeight, bandWidth, rowHeight));
+	timeline.mutes = timeline.mutes.filter((m) => m.end === null || m.end > now - TIMELINE_MS - delay);
+	for (const m of timeline.mutes) {
+		const end = m.end === null ? now : m.end;
+		rows.forEach((row, i) => {
+			const from = row.muteShift < 0 ? m.start - delay : m.start;
+			const to = row.muteShift < 0 ? end : Math.min(now, end + delay);
+			g.fillRect(x(from), i * rowHeight, Math.max(2, x(to) - x(from)), rowHeight);
+		});
 	}
 
 	const drawRow = (list, top, colorName, label) => {
@@ -412,6 +417,8 @@ const agent = {
 	stopMic: null,
 	micGeneration: 0,
 	stopTimer: null,
+	hold: false,
+	holdPending: false,
 	player: new Player(),
 	log: $('agent-log'),
 };
@@ -472,6 +479,7 @@ function agentMessage(msg) {
 		case 'connected':
 			clearInterval(agent.ringTimer);
 			agent.state = 'IN_CALL';
+			setHold(false); // 차단 유지는 통화마다 꺼진 채로 시작한다
 			state.delayMs = msg.delayMs;
 			$('agent-call').textContent = msg.callId;
 			$('agent-delay').textContent = HAS_CITIZEN ? `${msg.delayMs}ms` : `${msg.delayMs / 1000}초`;
@@ -542,6 +550,7 @@ function stopAgentMic() {
 }
 
 function stopAgentCall() {
+	setHold(false);
 	if (agent.stopTimer) {
 		agent.stopTimer();
 		agent.stopTimer = null;
@@ -552,7 +561,8 @@ function stopAgentCall() {
 
 async function agentMute() {
 	if (!agent.callId) return;
-	timeline.mutes.push(performance.now());
+	const t = performance.now();
+	timeline.mutes.push({ start: t, end: t });
 	try {
 		const res = await fetch(`/api/v1/calls/${encodeURIComponent(agent.callId)}/mute`, { method: 'POST' });
 		const body = await res.json();
@@ -560,6 +570,58 @@ async function agentMute() {
 	} catch (e) {
 		logTo(agent.log, 'err', `차단 실패: ${e.message}`);
 	}
+}
+
+/**
+ * 차단 유지 켜기/끄기. 켜 두는 동안 민원인 목소리가 상담원에게 들리지 않는다.
+ * 요청은 한 번에 하나만 보낸다 (빠르게 여러 번 누르면 요청 순서가 뒤바뀌어 화면과 서버 상태가 어긋날 수 있다).
+ * 화면은 먼저 바꾸고, 응답이 오면 서버가 돌려준 상태로 맞춘다. 그 사이 통화가 바뀌었으면 응답은 무시한다.
+ */
+async function toggleHold() {
+	if (!agent.callId || agent.state !== 'IN_CALL' || agent.holdPending) return;
+	const callId = agent.callId;
+	const on = !agent.hold;
+	agent.holdPending = true;
+	setHoldBusy(true);
+	setHold(on);
+	try {
+		const res = await fetch(`/api/v1/calls/${encodeURIComponent(callId)}/mute-hold`, {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ hold: on }),
+		});
+		if (agent.callId !== callId) return;
+		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		const body = await res.json();
+		setHold(body.hold);
+		logTo(agent.log, 'sys', body.hold ? `차단 유지 켬 (대기 중이던 ${body.mutedFrames}프레임 무음)` : '차단 유지 끔');
+	} catch (e) {
+		if (agent.callId === callId) setHold(!on); // 서버에 반영되지 않았으면 화면도 되돌린다
+		logTo(agent.log, 'err', `차단 유지 실패: ${e.message}`);
+	} finally {
+		agent.holdPending = false;
+		setHoldBusy(false);
+	}
+}
+
+function setHoldBusy(busy) {
+	const button = $('agent-hold');
+	if (button) button.disabled = busy;
+}
+
+function setHold(on) {
+	if (agent.hold === on) return;
+	agent.hold = on;
+	document.body.dataset.hold = on ? 'on' : 'off';
+	const now = performance.now();
+	if (on) {
+		timeline.mutes.push({ start: now, end: null });
+	} else {
+		const open = timeline.mutes.find((m) => m.end === null);
+		if (open) open.end = now;
+	}
+	const button = $('agent-hold');
+	if (button) button.setAttribute('aria-pressed', String(on));
 }
 
 if (HAS_AGENT) {
@@ -571,7 +633,8 @@ $('agent-away').onclick = () => agent.conn.send({ type: 'status', state: 'AWAY' 
 $('agent-accept').onclick = () => agent.conn.send({ type: 'accept', callId: agent.callId });
 $('agent-reject').onclick = () => agent.conn.send({ type: 'reject', callId: agent.callId });
 $('agent-hangup').onclick = () => agent.conn.send({ type: 'hangup', callId: agent.callId });
-$('agent-mute').onclick = agentMute;
+if ($('agent-mute')) $('agent-mute').onclick = agentMute;
+if ($('agent-hold')) $('agent-hold').onclick = toggleHold;
 $('agent-mic').onchange = (e) => {
 	if (agent.state !== 'IN_CALL') return;
 	if (e.target.checked) startAgentMic();
@@ -580,7 +643,9 @@ $('agent-mic').onchange = (e) => {
 document.addEventListener('keydown', (e) => {
 	const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement;
 	if ((e.key === 'm' || e.key === 'M') && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !typing && agent.state === 'IN_CALL') {
-		agentMute();
+		// 상담원 앱은 켜기/끄기, 통합 콘솔은 한 번 차단 (차단 유지는 버튼으로)
+		if (HAS_CITIZEN) agentMute();
+		else toggleHold();
 	}
 });
 }

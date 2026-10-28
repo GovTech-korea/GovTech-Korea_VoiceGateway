@@ -53,9 +53,10 @@
 			<div class="meter"><div class="meter-fill" id="agent-meter"></div></div>
 			<div class="row">
 				<button id="agent-mute" class="warn" title="단축키 M">위험 구간 차단</button>
+				<button id="agent-hold" class="danger" aria-pressed="false" title="켜 두는 동안 계속 차단, 다시 누르면 해제"><span class="hold-off">차단 유지</span><span class="hold-on">차단 유지 해제</span></button>
 				<button id="agent-hangup" class="danger">끊기</button>
 			</div>
-			<p class="hint">차단은 아직 내 귀에 오지 않은 민원인 음성(지연 버퍼 안)을 무음으로 바꾼다. 실제로는 STT·위험 판단이 부른다.</p>
+			<p class="hint">위험 구간 차단은 아직 내 귀에 오지 않은 민원인 음성(지연 버퍼 안)을 한 번 지운다. 차단 유지는 켜 두는 동안 계속 지우고, 다시 누르면 해제한다. 실제로는 STT·위험 판단이 부른다.</p>
 		</div>
 		<ol class="log" id="agent-log"></ol>
 	</section>

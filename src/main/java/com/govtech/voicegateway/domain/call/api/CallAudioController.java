@@ -3,6 +3,7 @@ package com.govtech.voicegateway.domain.call.api;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -32,5 +33,16 @@ public class CallAudioController {
 		int muted = coordinator.mute(callId, range.fromEpochMs(), range.toEpochMs())
 				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "통화 중인 callId가 아닙니다: " + callId));
 		return new MuteResponse(callId, muted);
+	}
+
+	/**
+	 * 차단 유지를 켜거나 끈다. 켜 두는 동안 민원인 음성은 상담원에게 무음으로 가고, 끄면 다시 들린다.
+	 * 같은 요청을 여러 번 보내도 결과가 같다.
+	 */
+	@PutMapping("/{callId}/mute-hold")
+	public MuteHoldResponse holdMute(@PathVariable String callId, @Valid @RequestBody MuteHoldRequest request) {
+		int muted = coordinator.holdMute(callId, request.hold())
+				.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "통화 중인 callId가 아닙니다: " + callId));
+		return new MuteHoldResponse(callId, request.hold(), muted);
 	}
 }

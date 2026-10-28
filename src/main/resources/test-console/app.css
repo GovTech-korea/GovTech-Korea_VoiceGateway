@@ -296,7 +296,14 @@ input:focus, select:focus { border-color: var(--accent); outline: none; }
 .listen { background: var(--surface); border-radius: 16px; padding: 12px 14px; }
 .listen-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--text-2); margin-bottom: 4px; }
 .listen .voice { height: 36px; justify-content: flex-start; margin-bottom: 6px; }
-.mute-btn { font-size: 18px; padding: 18px; margin-top: auto; box-shadow: 0 10px 24px rgba(247, 144, 9, 0.3); }
+.mute-btn { font-size: 18px; padding: 18px; margin-top: auto; background: var(--amber); color: #fff; box-shadow: 0 10px 24px rgba(247, 144, 9, 0.3); }
+.hold-on, [data-hold="on"] .hold-off { display: none; }
+[data-hold="on"] .hold-on { display: inline; }
+[data-hold="on"] .mute-btn { background: var(--red); box-shadow: 0 0 0 0 rgba(240, 68, 56, 0.6); animation: holding 1.4s ease-out infinite; }
+@keyframes holding { 0% { box-shadow: 0 0 0 0 rgba(240, 68, 56, 0.55); } 100% { box-shadow: 0 0 0 14px rgba(240, 68, 56, 0); } }
+.hold-hint { margin-top: -6px; }
+[data-hold="on"] .hold-hint { color: #f97066; font-weight: 600; }
+[data-hold="on"] .protect { background: rgba(240, 68, 56, 0.16); }
 .mute-btn .kbd { font: 700 11px/1 var(--mono); padding: 3px 6px; border-radius: 6px; background: rgba(255, 255, 255, 0.25); }
 .call-bottom { display: flex; align-items: center; justify-content: space-between; }
 .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: var(--text-2); }
@@ -333,3 +340,4 @@ input:focus, select:focus { border-color: var(--accent); outline: none; }
 .flow li { counter-increment: f; display: flex; align-items: center; gap: 8px; }
 .flow li::before { content: counter(f); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; background: var(--page-text); color: var(--page); }
 .landing-foot { text-align: center; color: var(--page-text-2); font-size: 13px; margin-top: 28px; }
+.mute-btn:disabled { opacity: 0.85; }

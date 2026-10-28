@@ -1,11 +1,13 @@
 package com.govtech.voicegateway.domain.call.api;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -71,5 +73,49 @@ class CallAudioControllerTest {
 				.andExpect(status().isBadRequest());
 
 		verify(coordinator, never()).mute(any(), any(), any());
+	}
+
+	@Test
+	@DisplayName("차단 유지 켜기: 켤 때 무음 처리한 대기 프레임 수를 돌려준다")
+	void holdOn() throws Exception {
+		given(coordinator.holdMute("call-1", true)).willReturn(OptionalInt.of(40));
+
+		mockMvc.perform(put("/api/v1/calls/call-1/mute-hold")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"hold\":true}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.hold").value(true))
+				.andExpect(jsonPath("$.mutedFrames").value(40));
+	}
+
+	@Test
+	@DisplayName("차단 유지 끄기")
+	void holdOff() throws Exception {
+		given(coordinator.holdMute("call-1", false)).willReturn(OptionalInt.of(0));
+
+		mockMvc.perform(put("/api/v1/calls/call-1/mute-hold")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"hold\":false}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.hold").value(false));
+	}
+
+	@Test
+	@DisplayName("차단 유지: 통화 중이 아니면 404, hold가 없으면 400")
+	void holdErrors() throws Exception {
+		given(coordinator.holdMute(eq("none"), anyBoolean())).willReturn(OptionalInt.empty());
+
+		mockMvc.perform(put("/api/v1/calls/none/mute-hold")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"hold\":true}"))
+				.andExpect(status().isNotFound());
+		for (String body : new String[] { "{}", "{\"hold\":null}" }) {
+			mockMvc.perform(put("/api/v1/calls/call-1/mute-hold")
+							.contentType(MediaType.APPLICATION_JSON)
+							.content(body))
+					.andExpect(status().isBadRequest());
+		}
+		mockMvc.perform(put("/api/v1/calls/call-1/mute-hold"))
+				.andExpect(status().isBadRequest());
 	}
 }

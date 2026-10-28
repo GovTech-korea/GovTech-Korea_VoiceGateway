@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
  * 민원인 → 상담원 음성을 정해진 시간만큼 붙잡아 두었다가 내보내는 지연 버퍼 (통화마다 하나).
  * <p>
  * 아직 내보내지 않은 프레임은 {@link #mute}로 무음(0)으로 바꿀 수 있다. 위험 발화를 상담원이 듣기 전에 지우는 데 쓴다.
+ * {@link #setHold}로 차단을 유지하면, 유지하는 동안 들어오는 프레임도 모두 무음으로 내보낸다.
  * 시간은 밖에서 넣어 준다: 내보낼 때를 정하는 단조 시각(nanoTime)과, 차단 구간을 지정하는 벽시계 시각(epoch ms).
  * <p>
  * 내보내기는 잠금 안에서 한다. {@link AudioSink}는 막히지 않아야 하고(연결의 송신 큐에 넣기만 함),
@@ -28,6 +29,7 @@ public final class DelayLine {
 	private boolean closed;
 	private long dropped;
 	private long mutedTotal;
+	private boolean hold;
 
 	public DelayLine(Duration delay, AudioSink target) {
 		this.delayNanos = delay.toNanos();
@@ -45,7 +47,10 @@ public final class DelayLine {
 			return;
 		}
 		if (delayNanos == 0) {
-			target.accept(frame);
+			if (hold) {
+				mutedTotal++;
+			}
+			target.accept(hold ? new byte[frame.length] : frame);
 			return;
 		}
 		if (pending.size() >= capacity) {
@@ -54,7 +59,12 @@ public final class DelayLine {
 			}
 			return;
 		}
-		pending.addLast(new Frame(frame, nowNanos + delayNanos, receivedAtMillis));
+		Frame entry = new Frame(frame, nowNanos + delayNanos, receivedAtMillis);
+		// 차단 유지 중이면 처음부터 무음 처리된 프레임으로 넣어, 나중에 다시 차단해도 두 번 세지 않게 한다
+		if (hold && entry.mute()) {
+			mutedTotal++;
+		}
+		pending.addLast(entry);
 	}
 
 	/** 내보낼 때가 된 프레임을 받은 순서대로 내보낸다. */
@@ -83,6 +93,26 @@ public final class DelayLine {
 	/** 아직 내보내지 않은 프레임을 모두 무음으로 바꾼다. */
 	public int muteAll() {
 		return mute(Long.MIN_VALUE, Long.MAX_VALUE);
+	}
+
+	/**
+	 * 차단 유지를 켜거나 끈다. 켜면 아직 내보내지 않은 프레임도 무음으로 바꾼다.
+	 * 끄면 그 뒤에 들어오는 프레임부터 다시 들린다 (유지하는 동안 받아 둔 프레임은 무음 그대로).
+	 *
+	 * @return 켤 때 새로 무음 처리한 대기 프레임 수 (끌 때는 0)
+	 */
+	public synchronized int setHold(boolean on) {
+		hold = on;
+		return on ? muteAll() : 0;
+	}
+
+	public synchronized boolean isHold() {
+		return hold;
+	}
+
+	/** 통화가 끝나 닫혔는지. 닫힌 버퍼에 한 차단은 아무 효과가 없다 */
+	public synchronized boolean isClosed() {
+		return closed;
 	}
 
 	/** 통화 종료: 남은 프레임은 버린다. */

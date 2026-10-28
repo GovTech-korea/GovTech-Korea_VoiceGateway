@@ -23,9 +23,10 @@ public record CallCenterSnapshot(List<AgentView> agents, List<String> queue, Lis
 	 * @param sttBytes           STT 전달에 성공한 바이트 수
 	 * @param sttFailures        STT 전달에 실패한 조각 수
 	 * @param mutedFrames        무음 처리한 프레임 수
+	 * @param muteHold           차단 유지 중인지
 	 * @param pendingFrames      지연 버퍼에서 상담원에게 나가기를 기다리는 프레임 수
 	 */
 	public record CallView(String callId, String state, String agentId, Long connectedAtEpochMs, long sttChunks,
-			long sttBytes, long sttFailures, long mutedFrames, int pendingFrames) {
+			long sttBytes, long sttFailures, long mutedFrames, boolean muteHold, int pendingFrames) {
 	}
 }

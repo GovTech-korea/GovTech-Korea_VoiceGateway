@@ -71,6 +71,50 @@ class CallAudioDelayIntegrationTest {
 		citizen.close();
 	}
 
+	@Test
+	@DisplayName("차단 유지 API를 켜 두면 그동안 보낸 민원인 음성이 상담원에게 무음으로 가고, 끄면 다시 들린다")
+	void holdThroughApi() throws Exception {
+		WsTestClient[] call = WsTestClient.connectCall(port, "hold-agent", "hold-call");
+		WsTestClient agent = call[0];
+		WsTestClient citizen = call[1];
+		assertThat(putHold("no-such-call", true).statusCode()).isEqualTo(404); // 예열
+
+		assertThat(putHold("hold-call", true).statusCode()).isEqualTo(200);
+		citizen.sendBinary(filled(5));
+		awaitPendingFrames("hold-call", 1); // 프레임이 지연 버퍼에 들어간 뒤 끈다
+		assertThat(putHold("hold-call", false).body()).contains("\"hold\":false");
+		citizen.sendBinary(filled(6));
+
+		assertThat(agent.nextBinary()).isEqualTo(new byte[640]);
+		assertThat(agent.nextBinary()).isEqualTo(filled(6));
+
+		agent.close();
+		citizen.close();
+	}
+
+	private void awaitPendingFrames(String callId, int count) throws Exception {
+		long deadline = System.nanoTime() + 2_000_000_000L;
+		while (System.nanoTime() < deadline) {
+			String status = HttpClient.newHttpClient().send(
+					HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/status")).build(),
+					HttpResponse.BodyHandlers.ofString()).body();
+			if (status.matches("(?s).*\"callId\":\"" + callId + "\".*\"pendingFrames\":[" + count + "-9]\\d*.*")) {
+				return;
+			}
+			Thread.sleep(10);
+		}
+		throw new AssertionError("지연 버퍼에 프레임이 들어오지 않음");
+	}
+
+	private HttpResponse<String> putHold(String callId, boolean hold) throws Exception {
+		return HttpClient.newHttpClient().send(
+				HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/calls/" + callId + "/mute-hold"))
+						.header("Content-Type", "application/json")
+						.PUT(HttpRequest.BodyPublishers.ofString("{\"hold\":" + hold + "}"))
+						.build(),
+				HttpResponse.BodyHandlers.ofString());
+	}
+
 	private HttpResponse<String> postMute(String callId) throws Exception {
 		return HttpClient.newHttpClient().send(
 				HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/calls/" + callId + "/mute"))
