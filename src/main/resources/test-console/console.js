@@ -11,6 +11,33 @@ const TIMELINE_MS = 10000;
 
 const $ = (id) => document.getElementById(id);
 
+// 같은 스크립트를 통합 콘솔(console.html)과 역할별 화면(agent.html, citizen.html)이 함께 쓴다.
+// 페이지에 있는 칸만 동작시킨다.
+const HAS_AGENT = !!$('agent-panel');
+const HAS_CITIZEN = !!$('citizen-panel');
+const HAS_STATUS = !!$('status-panel');
+
+/** 페이지에 있을 때만 글자를 바꾼다 */
+function setText(id, text) {
+	const el = $(id);
+	if (el) el.textContent = text;
+}
+
+/** 통화 시간 표시 (mm:ss). 시작하면 멈추는 함수를 돌려준다 */
+function startCallTimer(id) {
+	const start = performance.now();
+	const tick = () => {
+		const sec = Math.floor((performance.now() - start) / 1000);
+		setText(id, `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`);
+	};
+	tick();
+	const timer = setInterval(tick, 500);
+	return () => {
+		clearInterval(timer);
+		setText(id, '');
+	};
+}
+
 // ---------- 공통: 오디오 ----------
 
 let audioContext;
@@ -323,12 +350,16 @@ function drawTimeline() {
 	const g = canvas.getContext('2d');
 	g.setTransform(ratio, 0, 0, ratio, 0, 0);
 	g.clearRect(0, 0, width, height);
-	const css = getComputedStyle(document.documentElement);
+	const css = getComputedStyle(canvas); // 앱 화면은 색을 앱 틀에 정의하므로 캔버스 기준으로 읽는다
 	const color = (name) => css.getPropertyValue(name).trim();
 	const now = performance.now();
 	const x = (t) => width - ((now - t) / TIMELINE_MS) * width;
 	const labelWidth = 0;
-	const rowHeight = (height - 18) / 2;
+	// 페이지에 있는 역할의 줄만 그린다 (민원인 화면은 보낸 소리, 상담원 화면은 들은 소리)
+	const rows = [];
+	if (HAS_CITIZEN) rows.push({ list: timeline.sent, color: '--sent', label: '민원인이 보낸 소리', muteShift: -1 });
+	if (HAS_AGENT) rows.push({ list: timeline.heard, color: '--heard', label: '상담원이 들은 소리', muteShift: 0 });
+	const rowHeight = (height - 18) / Math.max(1, rows.length);
 
 	// 1초 눈금
 	g.strokeStyle = color('--line');
@@ -351,8 +382,7 @@ function drawTimeline() {
 	const bandWidth = Math.max(2, (delay / TIMELINE_MS) * width);
 	timeline.mutes = timeline.mutes.filter((t) => t > now - TIMELINE_MS - delay);
 	for (const t of timeline.mutes) {
-		g.fillRect(x(t - delay), 0, bandWidth, rowHeight);
-		g.fillRect(x(t), rowHeight, bandWidth, rowHeight);
+		rows.forEach((row, i) => g.fillRect(x(t + row.muteShift * delay), i * rowHeight, bandWidth, rowHeight));
 	}
 
 	const drawRow = (list, top, colorName, label) => {
@@ -362,11 +392,12 @@ function drawTimeline() {
 			const h = Math.max(1, v * (rowHeight - 8));
 			g.fillRect(x(t), top + (rowHeight - h) / 2, barWidth, h);
 		}
-		g.fillStyle = color('--muted');
-		g.fillText(label, 4 + labelWidth, top + 12);
+		if (rows.length > 1) {
+			g.fillStyle = color('--muted');
+			g.fillText(label, 4 + labelWidth, top + 12);
+		}
 	};
-	drawRow(timeline.sent, 0, '--sent', '민원인이 보낸 소리');
-	drawRow(timeline.heard, rowHeight, '--heard', '상담원이 들은 소리');
+	rows.forEach((row, i) => drawRow(row.list, i * rowHeight, row.color, row.label));
 	requestAnimationFrame(drawTimeline);
 }
 
@@ -380,6 +411,7 @@ const agent = {
 	ringTimer: null,
 	stopMic: null,
 	micGeneration: 0,
+	stopTimer: null,
 	player: new Player(),
 	log: $('agent-log'),
 };
@@ -396,6 +428,9 @@ function agentUi() {
 	const labels = { READY: ['대기 중', 'ok'], AWAY: ['자리 비움', 'warn'], RINGING: ['벨 울림', 'warn'], IN_CALL: ['통화 중', 'active'] };
 	const [text, kind] = connected ? labels[agent.state] || ['접속 중', ''] : ['연결 안 됨', ''];
 	setBadge($('agent-state'), text, kind);
+	setText('agent-state-text', text);
+	// 역할별 화면은 이 값으로 로그인·대기·벨·통화 화면을 바꿔 보여 준다
+	document.body.dataset.agent = connected ? agent.state || 'CONNECTING' : 'OFFLINE';
 }
 
 async function agentConnect() {
@@ -405,6 +440,7 @@ async function agentConnect() {
 		return;
 	}
 	context();
+	setText('agent-name', agentId);
 	agent.conn = openSocket(agent.log, agentMessage, agentAudio, agentClosed);
 	agentUi();
 	try {
@@ -438,8 +474,10 @@ function agentMessage(msg) {
 			agent.state = 'IN_CALL';
 			state.delayMs = msg.delayMs;
 			$('agent-call').textContent = msg.callId;
-			$('agent-delay').textContent = `${msg.delayMs}ms`;
+			$('agent-delay').textContent = HAS_CITIZEN ? `${msg.delayMs}ms` : `${msg.delayMs / 1000}초`;
 			agent.player.reset();
+			if (agent.stopTimer) agent.stopTimer();
+			agent.stopTimer = startCallTimer('agent-timer');
 			if ($('agent-mic').checked) startAgentMic();
 			break;
 		case 'call-ended':
@@ -454,6 +492,7 @@ function agentAudio(frame) {
 	agent.player.play(frame);
 	const v = level(frame);
 	$('agent-meter').style.width = `${v * 100}%`;
+	document.body.style.setProperty('--voice', v.toFixed(2));
 	timeline.add(timeline.heard, v);
 }
 
@@ -469,7 +508,10 @@ function startCountdown(timeoutMs) {
 	clearInterval(agent.ringTimer);
 	const end = performance.now() + timeoutMs;
 	const tick = () => {
-		$('ring-countdown').textContent = `${Math.max(0, Math.ceil((end - performance.now()) / 1000))}초`;
+		const left = Math.max(0, end - performance.now());
+		$('ring-countdown').textContent = `${Math.ceil(left / 1000)}초`;
+		const bar = $('ring-progress');
+		if (bar) bar.style.width = `${(left / timeoutMs) * 100}%`;
 	};
 	tick();
 	agent.ringTimer = setInterval(tick, 250);
@@ -477,7 +519,7 @@ function startCountdown(timeoutMs) {
 
 // 마이크는 권한 확인 등으로 늦게 열린다. 그 사이 통화가 끝나거나 다시 켜면 세대 번호가 바뀌고, 늦게 열린 마이크는 바로 닫는다
 async function startAgentMic() {
-	stopAgentCall();
+	stopAgentMic();
 	const generation = ++agent.micGeneration;
 	try {
 		const stop = await micSource((frame) => agent.conn && agent.conn.sendAudio(frame));
@@ -491,12 +533,20 @@ async function startAgentMic() {
 	}
 }
 
-function stopAgentCall() {
+function stopAgentMic() {
 	agent.micGeneration++;
 	if (agent.stopMic) {
 		agent.stopMic();
 		agent.stopMic = null;
 	}
+}
+
+function stopAgentCall() {
+	if (agent.stopTimer) {
+		agent.stopTimer();
+		agent.stopTimer = null;
+	}
+	stopAgentMic();
 	$('agent-meter').style.width = '0';
 }
 
@@ -512,6 +562,7 @@ async function agentMute() {
 	}
 }
 
+if (HAS_AGENT) {
 $('agent-id').value = randomId('agent');
 $('agent-connect').onclick = agentConnect;
 $('agent-disconnect').onclick = () => agent.conn && agent.conn.ws.close();
@@ -524,13 +575,15 @@ $('agent-mute').onclick = agentMute;
 $('agent-mic').onchange = (e) => {
 	if (agent.state !== 'IN_CALL') return;
 	if (e.target.checked) startAgentMic();
-	else stopAgentCall();
+	else stopAgentMic();
 };
 document.addEventListener('keydown', (e) => {
-	if ((e.key === 'm' || e.key === 'M') && !(e.target instanceof HTMLInputElement) && agent.state === 'IN_CALL') {
+	const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement;
+	if ((e.key === 'm' || e.key === 'M') && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !typing && agent.state === 'IN_CALL') {
 		agentMute();
 	}
 });
+}
 
 // ---------- 민원인 ----------
 
@@ -539,10 +592,18 @@ const citizen = {
 	callId: null,
 	stopSource: null,
 	sourceGeneration: 0,
+	stopTimer: null,
 	player: new Player(),
 	log: $('citizen-log'),
 	fileSamples: null,
 };
+
+/** 역할별 화면용: 상태 이름과 큰 안내 문구 */
+function citizenView(view, headline, sub) {
+	document.body.dataset.citizen = view;
+	setText('citizen-headline', headline);
+	setText('citizen-sub', sub || '');
+}
 
 function citizenUi(text, kind) {
 	const calling = !!citizen.conn;
@@ -570,6 +631,7 @@ async function citizenCall() {
 	citizen.callId = callId;
 	citizen.conn = openSocket(citizen.log, citizenMessage, citizenAudio, citizenClosed);
 	citizenUi('연결 중', '');
+	citizenView('CONNECTING', '연결하는 중', '');
 	try {
 		await citizen.conn.opened;
 		citizen.conn.send({ type: 'join', role: 'CITIZEN', callId, audio: AUDIO_FORMAT });
@@ -582,18 +644,26 @@ function citizenMessage(msg) {
 	switch (msg.type) {
 		case 'queued':
 			citizenUi(`대기 ${msg.position}번째`, 'warn');
+			citizenView('QUEUED', '상담원을 기다리는 중',
+				msg.position > 1 ? `앞에 ${msg.position - 1}명이 기다리고 있어요` : '곧 연결됩니다');
 			break;
 		case 'agent-ringing':
 			citizenUi('상담원 연결 중', 'warn');
+			citizenView('RINGING', '상담원에게 연결하는 중', '상담원이 전화를 받으면 바로 통화가 시작돼요');
 			break;
 		case 'connected':
 			citizenUi('통화 중', 'active');
+			citizenView('IN_CALL', '상담 중', '편하게 말씀하세요');
 			citizen.player.reset();
+			stopCitizenTimer();
+			citizen.stopTimer = startCallTimer('citizen-timer');
 			startCitizenSource();
 			break;
 		case 'call-ended':
 			citizenUi('통화 종료', '');
+			citizenView('ENDED', '통화가 끝났어요', msg.reason === 'HANGUP_AGENT' ? '상담원이 통화를 종료했어요' : '');
 			stopCitizenSource();
+			stopCitizenTimer();
 			break;
 	}
 }
@@ -604,10 +674,12 @@ function citizenAudio(frame) {
 
 function citizenClosed() {
 	stopCitizenSource();
+	stopCitizenTimer();
 	citizen.conn = null;
 	citizenUi();
 	if ($('citizen-state').textContent !== '통화 종료') {
 		setBadge($('citizen-state'), '전화 안 함', '');
+		citizenView('IDLE', '민원 상담 센터', '아래 버튼을 눌러 전화를 걸어 주세요');
 	}
 	$('citizen-call-id').value = randomId('call');
 }
@@ -617,6 +689,7 @@ function sendCitizenFrame(frame) {
 	citizen.conn.sendAudio(frame);
 	const v = level(frame);
 	$('citizen-meter').style.width = `${v * 100}%`;
+	document.body.style.setProperty('--voice', v.toFixed(2));
 	timeline.add(timeline.sent, v);
 }
 
@@ -643,6 +716,13 @@ async function startCitizenSource() {
 	}
 }
 
+function stopCitizenTimer() {
+	if (citizen.stopTimer) {
+		citizen.stopTimer();
+		citizen.stopTimer = null;
+	}
+}
+
 function stopCitizenSource() {
 	citizen.sourceGeneration++;
 	if (citizen.stopSource) {
@@ -652,6 +732,8 @@ function stopCitizenSource() {
 	$('citizen-meter').style.width = '0';
 }
 
+if (HAS_CITIZEN) {
+citizenView('IDLE', '민원 상담 센터', '아래 버튼을 눌러 전화를 걸어 주세요');
 $('citizen-call-id').value = randomId('call');
 $('citizen-new-id').onclick = () => ($('citizen-call-id').value = randomId('call'));
 $('citizen-call').onclick = citizenCall;
@@ -673,6 +755,7 @@ $('citizen-file').onchange = async (e) => {
 		logTo(citizen.log, 'err', `파일을 읽지 못함: ${e2.message}`);
 	}
 };
+}
 
 // ---------- 게이트웨이 상태 ----------
 
@@ -715,6 +798,10 @@ async function refreshStatus() {
 		$('server-dot').className = 'dot ok';
 		$('server-text').textContent = '게이트웨이 연결됨';
 		if (!state.delayMs) state.delayMs = s.delayMs;
+		setText('delay-ms', `${s.delayMs / 1000}초`);
+		const waiting = s.queue.length;
+		setText('agent-queue-count', waiting ? `기다리는 민원인 ${waiting}명` : '기다리는 민원인 없음');
+		if (!HAS_STATUS) return;
 		setBadge($('status-config'), `지연 ${s.delayMs}ms · STT ${s.sttFormat}`, '');
 		fillTable($('status-agents'),
 			s.agents.map((a) => [a.agentId, AGENT_STATES[a.state] || a.state, a.callId || '-']), 3, '접속한 상담원 없음');
@@ -780,8 +867,15 @@ async function refreshRecordings(enabled) {
 	}
 }
 
-agentUi();
-citizenUi();
+if (HAS_AGENT) agentUi();
+if (HAS_CITIZEN) citizenUi();
+// 앱 화면 상단 상태바 시각
+(function statusBarClock() {
+	const now = new Date();
+	setText('sb-time', `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`);
+	setTimeout(statusBarClock, 15000);
+})();
+
 // 앞 조회가 끝난 뒤 1초 뒤에 다음 조회 (느린 응답이 겹쳐 순서가 뒤바뀌지 않게)
 (async function pollStatus() {
 	await refreshStatus();

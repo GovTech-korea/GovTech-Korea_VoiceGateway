@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>민원 상담 전화 · MOMIN</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body data-citizen="IDLE">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<defs>
+		<symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></symbol>
+		<symbol id="i-headset" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></symbol>
+		<symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+		<symbol id="i-mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="m23 9-6 6M17 9l6 6"/></symbol>
+		<symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/></symbol>
+		<symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+		<symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+		<symbol id="i-coffee" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8zM6 1v3M10 1v3M14 1v3"/></symbol>
+		<symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+		<symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+	</defs>
+</svg>
+<div class="stage">
+	<aside class="guide guide-citizen">
+		<span class="role-tag"><svg width="16" height="16"><use href="#i-phone"/></svg>민원인 앱</span>
+		<h1>상담 센터에<br>전화를 걸어 보세요</h1>
+		<p>실제로는 휴대폰 앱입니다. 이 화면을 휴대폰으로 열면 앱처럼 꽉 차게 보여요.</p>
+		<ol>
+			<li><span>말하는 방법을 고릅니다. 보통은 <strong>마이크</strong></span></li>
+			<li><span>초록 <strong>전화 버튼</strong>을 누릅니다</span></li>
+			<li><span>상담원이 받으면 <strong>상담 중</strong>으로 바뀝니다. 그때 말하세요</span></li>
+			<li><span>끝나면 빨간 <strong>끊기</strong> 버튼</span></li>
+		</ol>
+		<a class="back" href="index.html">← 역할 다시 고르기</a>
+		<details class="devlog"><summary>개발자용 메시지 기록</summary><ol class="log" id="citizen-log"></ol></details>
+	</aside>
+
+	<div class="device app-citizen" id="citizen-panel">
+		<div class="statusbar" aria-hidden="true"><span id="sb-time">9:41</span><span class="icons"><svg width="16" height="12" viewBox="0 0 16 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="7" rx="1"/><rect x="9" y="2" width="3" height="10" rx="1"/></svg><i></i></span></div>
+		<header class="appbar">
+			<span class="appbar-title"><span class="app-logo"><svg width="18" height="18"><use href="#i-phone"/></svg></span>민원 상담 전화</span>
+			<span class="conn"><span class="dot" id="server-dot"></span><span id="server-text">확인 중</span></span>
+		</header>
+		<main class="screen">
+			<div class="screen-view view-main">
+				<section class="call-hero" aria-live="polite">
+					<div class="avatar" aria-hidden="true"><svg width="48" height="48"><use href="#i-headset"/></svg></div>
+					<h1 id="citizen-headline">민원 상담 센터</h1>
+					<p class="call-sub" id="citizen-sub"></p>
+					<p class="call-timer" id="citizen-timer" aria-live="off"></p>
+					<div class="voice" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+					<span class="badge" id="citizen-state">전화 안 함</span>
+				</section>
+
+				<div class="sent-card">
+					<p class="hint">내 목소리가 상담 센터로 가고 있어요</p>
+					<canvas id="timeline" role="img" aria-label="최근 10초 동안 보낸 소리의 크기"></canvas>
+				</div>
+
+				<div class="picker">
+					<p class="source-label">말하는 방법</p>
+					<select id="citizen-source" aria-label="말하는 방법">
+						<option value="mic">🎙 마이크로 말하기</option>
+						<option value="tone">🔊 테스트 소리 (삐-)</option>
+						<option value="file">📁 오디오 파일 재생</option>
+					</select>
+					<input type="file" id="citizen-file" accept="audio/*" hidden>
+					<p class="hint delay-note">상담원에게는 약 <span id="delay-ms">0.8초</span> 늦게 들려요</p>
+				</div>
+
+				<div class="dial">
+					<div class="dial-call">
+						<button class="round round-green" id="citizen-call" aria-label="전화 걸기"><svg width="30" height="30"><use href="#i-phone"/></svg></button>
+						<span class="round-label">전화 걸기</span>
+					</div>
+					<div class="dial-hangup">
+						<button class="round round-red" id="citizen-hangup" aria-label="끊기"><svg width="30" height="30" style="transform:rotate(135deg)"><use href="#i-phone"/></svg></button>
+						<span class="round-label">끊기</span>
+					</div>
+				</div>
+				<div class="meter"><div class="meter-fill" id="citizen-meter"></div></div>
+
+				<details class="callid">
+					<summary>통화 ID</summary>
+					<div class="row">
+						<input id="citizen-call-id" maxlength="64" aria-label="통화 ID">
+						<button class="btn btn-surface" id="citizen-new-id">새로</button>
+					</div>
+				</details>
+			</div>
+		</main>
+	</div>
+</div>
+<script src="console.js"></script>
+</body>
+</html>

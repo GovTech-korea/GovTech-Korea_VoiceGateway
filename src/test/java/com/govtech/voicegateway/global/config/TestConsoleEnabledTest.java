@@ -21,12 +21,18 @@ class TestConsoleEnabledTest {
 	private MockMvc mockMvc;
 
 	@Test
-	@DisplayName("기본 설정이면 /test가 콘솔로 이동하고, 콘솔 파일과 현황 API가 열린다")
+	@DisplayName("기본 설정이면 /test가 역할 선택 화면으로 이동하고, 역할별 화면·통합 콘솔·현황 API가 열린다")
 	void enabledByDefault() throws Exception {
 		mockMvc.perform(get("/test")).andExpect(redirectedUrl("/test/index.html"));
 		mockMvc.perform(get("/test/index.html"))
 				.andExpect(status().isOk())
-				.andExpect(content().string(containsString("<script src=\"console.js\">")));
+				.andExpect(content().string(containsString("href=\"agent.html\"")))
+				.andExpect(content().string(containsString("href=\"citizen.html\"")));
+		for (String page : new String[] { "agent.html", "citizen.html", "console.html" }) {
+			mockMvc.perform(get("/test/" + page))
+					.andExpect(status().isOk())
+					.andExpect(content().string(containsString("<script src=\"console.js\">")));
+		}
 		mockMvc.perform(get("/test/console.js")).andExpect(status().isOk());
 		mockMvc.perform(get("/api/v1/status")).andExpect(status().isOk());
 	}
