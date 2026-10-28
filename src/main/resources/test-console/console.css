@@ -240,3 +240,7 @@ canvas.short { height: 110px; }
 details > summary { cursor: pointer; color: var(--muted); }
 details.panel > summary { font-weight: 600; }
 details[open] > summary { margin-bottom: 10px; }
+
+.hold-on, [data-hold="on"] .hold-off { display: none; }
+[data-hold="on"] .hold-on { display: inline; }
+[data-hold="on"] #agent-hold { background: var(--danger); color: #fff; }
