@@ -1,0 +1,335 @@
+/* 역할 선택·상담원 앱·민원인 앱 화면 (통합 콘솔은 console.css)
+ * 브라우저 화면을 휴대폰 앱처럼 보여 준다: 넓은 화면에서는 휴대폰 틀 안에, 휴대폰에서는 화면 전체에 그린다. */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
+
+:root {
+	--page: #eef1f5;
+	--page-text: #101828;
+	--page-text-2: #475467;
+	--green: #12b76a;
+	--red: #f04438;
+	--amber: #f79009;
+	--voice: 0;
+	--font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+	--mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root { --page: #090b0f; --page-text: #f2f4f7; --page-text-2: #98a2b3; }
+}
+
+/* ---------- 앱별 색 ---------- */
+
+/* 민원인 앱: 밝은 바탕, 초록 */
+.app-citizen {
+	--bg: #ffffff;
+	--surface: #f4f6f8;
+	--text: #101828;
+	--text-2: #475467;
+	--text-3: #98a2b3;
+	--line: #e4e7ec;
+	--accent: #12b76a;
+	--accent-soft: #e7f8ef;
+	--accent-text: #0a7c48;
+	--sent: #12b76a;
+	--heard: #12b76a;
+	--mute: rgba(240, 68, 56, 0.2);
+	--muted: #98a2b3;
+	color-scheme: light;
+}
+
+/* 상담원 앱: 남색 바탕, 파랑 */
+.app-agent {
+	--bg: #0f1729;
+	--surface: #18223a;
+	--surface-2: #212d49;
+	--text: #f2f5fb;
+	--text-2: #aab4c8;
+	--text-3: #6d7891;
+	--line: #26324d;
+	--accent: #4c7dff;
+	--accent-soft: #1d2b52;
+	--accent-text: #9db7ff;
+	--sent: #4c7dff;
+	--heard: #4cd38e;
+	--mute: rgba(240, 68, 56, 0.35);
+	--muted: #6d7891;
+	color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+h1, h2, h3, p { margin: 0; }
+svg { display: block; flex: none; }
+a { color: inherit; }
+
+body {
+	min-height: 100vh;
+	background: var(--page);
+	color: var(--page-text);
+	font: 15px/1.5 var(--font);
+	-webkit-font-smoothing: antialiased;
+}
+
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+button:disabled { cursor: default; opacity: 0.35; }
+:focus-visible { outline: 3px solid var(--accent, #2e5bff); outline-offset: 2px; }
+
+input, select {
+	font: inherit; color: var(--text);
+	background: var(--surface); border: 1.5px solid transparent;
+	border-radius: 14px; padding: 14px 16px; width: 100%;
+}
+input:focus, select:focus { border-color: var(--accent); outline: none; }
+
+.mono { font-family: var(--mono); }
+
+/* 콘솔 스크립트가 쓰지만 앱 화면에서는 보이지 않는 요소 */
+.badge, .meter { display: none !important; }
+.meter-fill { height: 100%; }
+
+/* ---------- 휴대폰 틀 (넓은 화면) ---------- */
+
+.stage {
+	min-height: 100vh;
+	display: flex; align-items: center; justify-content: center; gap: 56px;
+	padding: 32px 24px;
+}
+
+.device {
+	position: relative;
+	width: 390px; height: 844px; max-height: calc(100vh - 48px);
+	border-radius: 48px;
+	background: var(--bg); color: var(--text);
+	box-shadow: 0 0 0 10px #1b1f27, 0 0 0 11px #3a404c, 0 30px 80px rgba(0, 0, 0, 0.35);
+	overflow: hidden;
+	display: flex; flex-direction: column;
+}
+
+.statusbar {
+	display: flex; justify-content: space-between; align-items: center;
+	padding: 14px 28px 4px; font-size: 14px; font-weight: 600; flex: none;
+}
+.statusbar .icons { display: flex; gap: 6px; align-items: center; }
+.statusbar .icons i { display: block; width: 18px; height: 10px; border: 1.5px solid currentColor; border-radius: 3px; position: relative; }
+.statusbar .icons i::after { content: ""; position: absolute; inset: 1.5px 5px 1.5px 1.5px; background: currentColor; border-radius: 1px; }
+
+.appbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 20px 12px; flex: none; }
+.appbar-title { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; }
+.app-logo { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: var(--accent); color: #fff; }
+.conn { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); }
+.dot.ok { background: var(--green); }
+.dot.bad { background: var(--red); }
+
+.screen { flex: 1; overflow-y: auto; display: flex; flex-direction: column; padding: 8px 24px 28px; }
+.screen-view { flex: 1; display: none; flex-direction: column; }
+
+/* 옆 설명 (넓은 화면에서만) */
+.guide { width: 340px; color: var(--page-text); }
+.guide .role-tag { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; padding: 6px 12px; border-radius: 999px; margin-bottom: 16px; }
+.guide h1 { font-size: 30px; letter-spacing: -0.02em; line-height: 1.25; margin-bottom: 12px; }
+.guide > p { color: var(--page-text-2); margin-bottom: 24px; }
+.guide ol { margin: 0; padding: 0; list-style: none; counter-reset: g; display: flex; flex-direction: column; gap: 14px; }
+.guide li { counter-increment: g; display: flex; gap: 12px; color: var(--page-text-2); font-size: 14px; }
+.guide li::before { content: counter(g); flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 12px; background: var(--page-text); color: var(--page); }
+.guide li strong { color: var(--page-text); }
+.guide .back { display: inline-block; margin-top: 28px; font-size: 14px; color: var(--page-text-2); }
+.guide-agent .role-tag { background: #1d2b52; color: #9db7ff; }
+.guide-citizen .role-tag { background: #e7f8ef; color: #0a7c48; }
+
+.devlog { margin-top: 20px; font-size: 13px; color: var(--page-text-2); }
+.devlog summary { cursor: pointer; }
+.log { list-style: none; margin: 8px 0 0; padding: 10px; max-height: 200px; overflow-y: auto; background: rgba(127, 127, 127, 0.1); border-radius: 10px; font: 11px/1.5 var(--mono); }
+.log li { white-space: pre-wrap; word-break: break-all; }
+.log .in { color: #12b76a; } .log .out { color: #4c7dff; } .log .err { color: #f04438; }
+
+/* 휴대폰·좁은 화면: 틀 없이 화면 전체가 앱 */
+@media (max-width: 820px) {
+	.stage { padding: 0; display: block; }
+	.device { width: 100%; height: 100vh; height: 100dvh; max-height: none; border-radius: 0; box-shadow: none; }
+	.statusbar { display: none; }
+	.appbar { padding-top: max(14px, env(safe-area-inset-top)); }
+	.screen { padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+	.guide { display: none; }
+}
+
+/* ---------- 공통 조각 ---------- */
+
+.btn {
+	display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+	padding: 16px 20px; border-radius: 16px; font-weight: 700; font-size: 16px;
+	transition: transform 80ms, opacity 120ms;
+}
+.btn:active:not(:disabled) { transform: scale(0.97); }
+.btn-block { width: 100%; }
+.btn-accent { background: var(--accent); color: #fff; }
+.btn-surface { background: var(--surface); color: var(--text); }
+.btn-warn { background: var(--amber); color: #fff; }
+
+.round { width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center; color: #fff; transition: transform 80ms; }
+.round:active:not(:disabled) { transform: scale(0.93); }
+.round-green { background: var(--green); box-shadow: 0 10px 24px rgba(18, 183, 106, 0.35); }
+.round-red { background: var(--red); box-shadow: 0 10px 24px rgba(240, 68, 56, 0.35); }
+.round-label { display: block; text-align: center; font-size: 13px; color: var(--text-2); margin-top: 10px; }
+
+.voice { display: flex; align-items: center; justify-content: center; gap: 6px; height: 44px; color: var(--heard); }
+.voice i { width: 6px; border-radius: 3px; background: currentColor; height: calc(6px + var(--voice) * var(--h) * 38px); transition: height 80ms linear; }
+.voice i:nth-child(1) { --h: 0.5; } .voice i:nth-child(2) { --h: 0.8; } .voice i:nth-child(3) { --h: 1; }
+.voice i:nth-child(4) { --h: 0.7; } .voice i:nth-child(5) { --h: 0.45; }
+
+#timeline { width: 100%; height: 64px; display: block; }
+
+.hint { font-size: 13px; color: var(--text-3); }
+.center { text-align: center; }
+
+/* ---------- 민원인 앱 ---------- */
+
+.app-citizen .view-main { display: flex; }
+.call-hero { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 10px; padding-top: 8px; }
+.avatar {
+	position: relative; width: 120px; height: 120px; border-radius: 50%;
+	background: var(--accent-soft); color: var(--accent);
+	display: grid; place-items: center; margin-bottom: 18px;
+}
+.avatar::before, .avatar::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--accent); opacity: 0; }
+[data-citizen="CONNECTING"] .avatar::before, [data-citizen="QUEUED"] .avatar::before, [data-citizen="RINGING"] .avatar::before,
+[data-citizen="CONNECTING"] .avatar::after, [data-citizen="QUEUED"] .avatar::after, [data-citizen="RINGING"] .avatar::after { animation: ripple 2s ease-out infinite; }
+[data-citizen="CONNECTING"] .avatar::after, [data-citizen="QUEUED"] .avatar::after, [data-citizen="RINGING"] .avatar::after { animation-delay: 1s; }
+[data-citizen="IN_CALL"] .avatar { background: var(--accent); color: #fff; }
+@keyframes ripple { from { transform: scale(1); opacity: 0.55; } to { transform: scale(1.7); opacity: 0; } }
+
+.call-hero h1 { font-size: 26px; letter-spacing: -0.02em; }
+.call-sub { color: var(--text-2); min-height: 22px; }
+.call-timer { font: 600 20px/1 var(--mono); color: var(--text); min-height: 22px; margin-top: 6px; }
+.app-citizen .voice { visibility: hidden; }
+[data-citizen="IN_CALL"] .app-citizen .voice, .app-citizen[data-citizen="IN_CALL"] .voice { visibility: visible; }
+
+.sources { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 4px 0 20px; }
+.source-label { font-size: 13px; color: var(--text-2); text-align: center; margin-bottom: 8px; }
+.picker { margin-top: auto; }
+.picker select { text-align: center; font-weight: 600; appearance: none; background-image: none; }
+.delay-note { text-align: center; margin: 10px 0 22px; }
+
+.dial { display: flex; justify-content: center; }
+[data-citizen="CONNECTING"] .dial-call, [data-citizen="QUEUED"] .dial-call, [data-citizen="RINGING"] .dial-call, [data-citizen="IN_CALL"] .dial-call { display: none; }
+[data-citizen="IDLE"] .dial-hangup, [data-citizen="ENDED"] .dial-hangup { display: none; }
+[data-citizen="CONNECTING"] .picker, [data-citizen="QUEUED"] .picker, [data-citizen="RINGING"] .picker, [data-citizen="IN_CALL"] .picker { display: none; }
+
+.sent-card { background: var(--surface); border-radius: 16px; padding: 12px 14px; margin: 18px 0 18px; display: none; }
+[data-citizen="IN_CALL"] .sent-card { display: block; }
+.sent-card .hint { margin-bottom: 4px; }
+
+.callid { margin-top: 14px; }
+.callid summary { cursor: pointer; font-size: 12px; color: var(--text-3); text-align: center; }
+.callid .row { display: flex; gap: 8px; margin-top: 8px; }
+.callid .btn { padding: 12px 14px; font-size: 14px; white-space: nowrap; }
+
+/* ---------- 상담원 앱 ---------- */
+
+.state-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: var(--surface); font-size: 13px; font-weight: 600; color: var(--text-2); }
+.state-pill .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); }
+[data-agent="READY"] .status-dot { background: var(--green); }
+[data-agent="AWAY"] .status-dot { background: var(--amber); }
+[data-agent="RINGING"] .status-dot, [data-agent="IN_CALL"] .status-dot { background: var(--accent); }
+[data-agent="OFFLINE"] .state-pill, [data-agent="OFFLINE"] .icon-btn { display: none; }
+.icon-btn { width: 36px; height: 36px; border-radius: 12px; background: var(--surface); display: grid; place-items: center; color: var(--text-2); }
+
+[data-agent="OFFLINE"] .view-login { display: flex; }
+[data-agent="CONNECTING"] .view-idle, [data-agent="READY"] .view-idle, [data-agent="AWAY"] .view-idle { display: flex; }
+[data-agent="RINGING"] .view-ring { display: flex; }
+[data-agent="IN_CALL"] .view-call { display: flex; }
+
+/* 로그인 */
+.view-login { justify-content: center; gap: 12px; }
+.login-logo { width: 64px; height: 64px; border-radius: 20px; background: var(--accent); color: #fff; display: grid; place-items: center; margin-bottom: 12px; }
+.view-login h1 { font-size: 26px; letter-spacing: -0.02em; }
+.view-login p { color: var(--text-2); margin-bottom: 20px; }
+.view-login label { font-size: 13px; color: var(--text-2); font-weight: 600; }
+
+/* 대기 */
+.view-idle { gap: 16px; }
+.idle-hero { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 8px; }
+.idle-icon { width: 104px; height: 104px; border-radius: 50%; display: grid; place-items: center; margin-bottom: 14px; background: rgba(18, 183, 106, 0.14); color: var(--green); position: relative; }
+[data-agent="READY"] .idle-icon::after { content: ""; position: absolute; inset: -10px; border-radius: 50%; border: 2px solid rgba(18, 183, 106, 0.35); animation: breathe 2.4s ease-in-out infinite; }
+@keyframes breathe { 50% { transform: scale(1.08); opacity: 0.3; } }
+[data-agent="AWAY"] .idle-icon { background: rgba(247, 144, 9, 0.14); color: var(--amber); }
+.idle-hero h2 { font-size: 24px; letter-spacing: -0.02em; }
+.idle-hero p { color: var(--text-2); }
+.idle-away, [data-agent="AWAY"] .idle-ready { display: none; }
+[data-agent="AWAY"] .idle-away { display: inline; }
+[data-agent="AWAY"] svg.idle-away { display: block; }
+
+.queue-card { background: var(--surface); border-radius: 18px; padding: 16px 18px; display: flex; align-items: center; gap: 14px; }
+.queue-card svg { color: var(--accent-text); }
+.queue-card strong { display: block; font-size: 15px; }
+
+.segment { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--surface); border-radius: 16px; padding: 6px; }
+.segment button { padding: 12px; border-radius: 12px; font-weight: 700; color: var(--text-2); }
+.segment button:disabled { opacity: 1; cursor: default; }
+[data-agent="READY"] #agent-ready { background: var(--green); color: #fff; }
+[data-agent="AWAY"] #agent-away { background: var(--amber); color: #fff; }
+
+/* 벨 (전화 수신 화면) */
+.view-ring { align-items: center; text-align: center; }
+.ring-top { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+.ring-label { font-size: 14px; color: var(--accent-text); font-weight: 600; letter-spacing: 0.04em; }
+.ring-avatar { width: 112px; height: 112px; border-radius: 50%; background: var(--surface-2); display: grid; place-items: center; color: var(--text); margin: 8px 0 14px; position: relative; }
+.ring-avatar::before, .ring-avatar::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--green); animation: ripple 1.6s ease-out infinite; }
+.ring-avatar::after { animation-delay: 0.8s; }
+.view-ring h2 { font-size: 28px; letter-spacing: -0.02em; }
+.ring-meta { color: var(--text-2); font-size: 14px; }
+.ring-bar { width: 200px; height: 5px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: 18px; }
+.ring-bar div { height: 100%; width: 100%; background: var(--green); transition: width 250ms linear; }
+.ring-actions { display: flex; justify-content: space-around; width: 100%; padding: 0 12px 8px; }
+
+/* 통화 */
+.view-call { gap: 14px; }
+.call-top { text-align: center; padding-top: 6px; }
+.call-top .hint { color: var(--accent-text); font-weight: 600; }
+.call-top h2 { font-size: 22px; margin: 2px 0 6px; }
+.call-top .timer { font: 600 34px/1 var(--mono); }
+.protect { display: flex; gap: 10px; align-items: flex-start; background: var(--accent-soft); border-radius: 16px; padding: 12px 14px; font-size: 13px; color: var(--text-2); }
+.protect svg { color: var(--accent-text); margin-top: 1px; }
+.protect strong { color: var(--text); }
+.listen { background: var(--surface); border-radius: 16px; padding: 12px 14px; }
+.listen-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--text-2); margin-bottom: 4px; }
+.listen .voice { height: 36px; justify-content: flex-start; margin-bottom: 6px; }
+.mute-btn { font-size: 18px; padding: 18px; margin-top: auto; box-shadow: 0 10px 24px rgba(247, 144, 9, 0.3); }
+.mute-btn .kbd { font: 700 11px/1 var(--mono); padding: 3px 6px; border-radius: 6px; background: rgba(255, 255, 255, 0.25); }
+.call-bottom { display: flex; align-items: center; justify-content: space-between; }
+.switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: var(--text-2); }
+.switch input { appearance: none; width: 44px; height: 26px; border-radius: 999px; background: var(--surface-2); position: relative; padding: 0; border: 0; cursor: pointer; transition: background 120ms; flex: none; }
+.switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform 120ms; }
+.switch input:checked { background: var(--green); }
+.switch input:checked::after { transform: translateX(18px); }
+.call-bottom .round { width: 60px; height: 60px; }
+
+/* ---------- 역할 선택 ---------- */
+
+.landing { max-width: 920px; margin: 0 auto; padding: 48px 20px 56px; }
+.landing-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 40px; }
+.landing-brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; }
+.landing-brand span { width: 34px; height: 34px; border-radius: 10px; background: #2e5bff; color: #fff; display: grid; place-items: center; }
+.landing-conn { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--page-text-2); }
+.landing h1 { font-size: clamp(28px, 5vw, 40px); letter-spacing: -0.03em; line-height: 1.2; text-align: center; }
+.landing .lead { text-align: center; color: var(--page-text-2); margin: 14px auto 40px; font-size: 16px; max-width: 520px; }
+.roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+.role { display: flex; flex-direction: column; gap: 12px; padding: 28px; border-radius: 28px; text-decoration: none; min-height: 260px; transition: transform 120ms; }
+.role:hover { transform: translateY(-4px); }
+.role-agent { background: #0f1729; color: #f2f5fb; }
+.role-citizen { background: #ffffff; color: #101828; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 12px 32px rgba(16, 24, 40, 0.08); }
+.role-icon { width: 56px; height: 56px; border-radius: 18px; display: grid; place-items: center; }
+.role-agent .role-icon { background: #4c7dff; color: #fff; }
+.role-citizen .role-icon { background: #12b76a; color: #fff; }
+.role small { font-size: 13px; font-weight: 600; opacity: 0.7; }
+.role h2 { font-size: 24px; letter-spacing: -0.02em; }
+.role p { opacity: 0.75; }
+.role .go { margin-top: auto; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+.role-agent .go { color: #9db7ff; }
+.role-citizen .go { color: #0a7c48; }
+.flow { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px 24px; margin: 36px 0 0; padding: 0; list-style: none; color: var(--page-text-2); font-size: 14px; counter-reset: f; }
+.flow li { counter-increment: f; display: flex; align-items: center; gap: 8px; }
+.flow li::before { content: counter(f); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; background: var(--page-text); color: var(--page); }
+.landing-foot { text-align: center; color: var(--page-text-2); font-size: 13px; margin-top: 28px; }

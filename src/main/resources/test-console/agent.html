@@ -2,85 +2,121 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>상담원 화면 · Voice Gateway</title>
-<link rel="stylesheet" href="console.css">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1729">
+<title>상담원 앱 · MOMIN</title>
+<link rel="stylesheet" href="app.css">
 </head>
-<body>
-<main class="solo">
-	<header class="solo-head">
-		<a class="back" href="index.html">← 역할 선택</a>
-		<div class="server">
-			<span class="dot" id="server-dot"></span>
-			<span id="server-text">상태 확인 중</span>
-		</div>
-	</header>
-	<h1>🎧 상담원 화면</h1>
+<body data-agent="OFFLINE">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<defs>
+		<symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></symbol>
+		<symbol id="i-headset" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></symbol>
+		<symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+		<symbol id="i-mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="m23 9-6 6M17 9l6 6"/></symbol>
+		<symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/></symbol>
+		<symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+		<symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+		<symbol id="i-coffee" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8zM6 1v3M10 1v3M14 1v3"/></symbol>
+		<symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+		<symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+	</defs>
+</svg>
+<div class="stage">
+	<aside class="guide guide-agent">
+		<span class="role-tag"><svg width="16" height="16"><use href="#i-headset"/></svg>상담원 앱</span>
+		<h1>전화를 받고,<br>위험한 말은 막으세요</h1>
+		<p>실제로는 휴대폰 앱입니다. 이 화면을 휴대폰으로 열면 앱처럼 꽉 차게 보여요.</p>
+		<ol>
+			<li><span>이름을 정하고 <strong>접속</strong> → 대기 중</span></li>
+			<li><span>민원인이 걸면 전화 수신 화면이 뜹니다. <strong>20초 안에 받기</strong></span></li>
+			<li><span>민원인 목소리는 <strong><span id="delay-ms">0.8초</span> 늦게</strong> 들립니다</span></li>
+			<li><span>위험한 말이 나오면 바로 <strong>위험 구간 차단</strong> (키보드 M). 아직 안 들린 부분이 지워집니다</span></li>
+		</ol>
+		<a class="back" href="index.html">← 역할 다시 고르기</a>
+		<details class="devlog"><summary>개발자용 메시지 기록</summary><ol class="log" id="agent-log"></ol></details>
+	</aside>
 
-	<ol class="steps compact">
-		<li>이름(상담원 ID)을 확인하고 <strong>접속</strong>을 누릅니다 → "대기 중"</li>
-		<li>민원인이 전화를 걸면 벨이 울립니다. <strong>20초 안에 받기</strong>를 누르세요 (안 받으면 다음 상담원에게 넘어가고 "자리 비움"이 됩니다)</li>
-		<li>통화 중 민원인 목소리는 <strong>약 <span id="delay-ms">0.8초</span> 늦게</strong> 들립니다. 위험한 말이 나오면 바로 <strong>위험 구간 차단</strong>(키보드 M)</li>
-		<li><strong>내 마이크 보내기</strong>가 켜져 있으면 내 목소리가 민원인에게 갑니다. 스피커로 들으면 민원인 목소리가 다시 마이크로 들어가니 <strong>이어폰</strong>을 권장합니다</li>
-	</ol>
+	<div class="device app-agent" id="agent-panel">
+		<div class="statusbar" aria-hidden="true"><span id="sb-time">9:41</span><span class="icons"><svg width="16" height="12" viewBox="0 0 16 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="7" rx="1"/><rect x="9" y="2" width="3" height="10" rx="1"/></svg><i></i></span></div>
+		<header class="appbar">
+			<span class="appbar-title"><span class="app-logo"><svg width="18" height="18"><use href="#i-shield"/></svg></span>MOMIN 상담</span>
+			<span class="state-pill"><span class="status-dot"></span><span id="agent-state-text" aria-live="polite"></span></span>
+			<button class="icon-btn" id="agent-disconnect" aria-label="나가기" title="나가기"><svg width="18" height="18"><use href="#i-logout"/></svg></button>
+			<span class="conn" style="display:none"><span class="dot" id="server-dot"></span><span id="server-text"></span></span>
+		</header>
+		<main class="screen">
+			<!-- 로그인 -->
+			<section class="screen-view view-login">
+				<span class="login-logo"><svg width="32" height="32"><use href="#i-headset"/></svg></span>
+				<h1>상담을 시작할까요?</h1>
+				<p>접속하면 대기 상태가 되고, 민원인이 전화를 걸면 벨이 울려요.</p>
+				<label for="agent-id">상담원 이름 (영문·숫자)</label>
+				<input id="agent-id" maxlength="64" autocomplete="off">
+				<button class="btn btn-accent btn-block" id="agent-connect">접속하기</button>
+			</section>
 
-	<section class="panel" id="agent-panel">
-		<div class="panel-head">
-			<h2>상태</h2>
+			<!-- 대기 -->
+			<section class="screen-view view-idle">
+				<div class="idle-hero">
+					<span class="idle-icon"><svg width="40" height="40" class="idle-ready"><use href="#i-headset"/></svg><svg width="40" height="40" class="idle-away"><use href="#i-coffee"/></svg></span>
+					<h2><span class="idle-ready">전화 기다리는 중</span><span class="idle-away">자리 비움</span></h2>
+					<p><span class="idle-ready">전화가 오면 바로 알려 드릴게요</span><span class="idle-away">대기로 바꾸면 다시 전화를 받아요</span></p>
+					<p class="hint" id="agent-name"></p>
+				</div>
+				<div class="queue-card">
+					<svg width="22" height="22"><use href="#i-users"/></svg>
+					<div><strong>대기열</strong><span class="hint" id="agent-queue-count">기다리는 민원인 없음</span></div>
+				</div>
+				<div class="segment" role="group" aria-label="상담 상태">
+					<button id="agent-ready">대기</button>
+					<button id="agent-away">자리 비움</button>
+				</div>
+			</section>
+
+			<!-- 전화 수신 -->
+			<section class="screen-view view-ring" id="agent-ring" hidden role="alert">
+				<div class="ring-top">
+					<p class="ring-label">전화 수신</p>
+					<div class="ring-avatar" aria-hidden="true"><svg width="44" height="44"><use href="#i-user"/></svg></div>
+					<h2>민원인</h2>
+					<p class="ring-meta"><span class="mono" id="ring-call"></span></p>
+					<div class="ring-bar"><div id="ring-progress"></div></div>
+					<p class="ring-meta"><span id="ring-countdown"></span> 안에 받아 주세요</p>
+				</div>
+				<div class="ring-actions">
+					<div><button class="round round-red" id="agent-reject" aria-label="거절"><svg width="28" height="28" style="transform:rotate(135deg)"><use href="#i-phone"/></svg></button><span class="round-label">거절</span></div>
+					<div><button class="round round-green" id="agent-accept" aria-label="받기"><svg width="28" height="28"><use href="#i-phone"/></svg></button><span class="round-label">받기</span></div>
+				</div>
+			</section>
+
+			<!-- 통화 -->
+			<section class="screen-view view-call" id="agent-incall" hidden>
+				<div class="call-top">
+					<p class="hint">상담 중</p>
+					<h2 id="agent-call"></h2>
+					<p class="timer" id="agent-timer"></p>
+				</div>
+				<div class="protect">
+					<svg width="20" height="20"><use href="#i-shield"/></svg>
+					<p><strong>보호 중</strong> · 민원인 목소리는 <strong id="agent-delay"></strong> 늦게 들려요. 위험한 말은 들리기 전에 차단하세요.</p>
+				</div>
+				<div class="listen">
+					<div class="listen-head"><span>민원인 목소리</span><span>빨간 부분 = 차단</span></div>
+					<div class="voice" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+					<canvas id="timeline" role="img" aria-label="최근 10초 동안 들은 소리의 크기와 차단 구간"></canvas>
+				</div>
+				<div class="meter"><div class="meter-fill" id="agent-meter"></div></div>
+				<button class="btn btn-warn btn-block mute-btn" id="agent-mute"><svg width="22" height="22"><use href="#i-mute"/></svg>위험 구간 차단 <span class="kbd">M</span></button>
+				<div class="call-bottom">
+					<label class="switch"><input type="checkbox" id="agent-mic" checked> 내 목소리 보내기</label>
+					<div><button class="round round-red" id="agent-hangup" aria-label="끊기"><svg width="24" height="24" style="transform:rotate(135deg)"><use href="#i-phone"/></svg></button></div>
+				</div>
+			</section>
 			<span class="badge" id="agent-state">연결 안 됨</span>
-		</div>
-		<div class="row">
-			<label>상담원 ID <input id="agent-id" maxlength="64"></label>
-			<button id="agent-connect" class="primary">접속</button>
-			<button id="agent-disconnect">접속 끊기</button>
-		</div>
-		<div class="row">
-			<button id="agent-ready">대기(READY)</button>
-			<button id="agent-away">자리 비움(AWAY)</button>
-			<label class="check"><input type="checkbox" id="agent-mic" checked> 내 마이크 보내기</label>
-		</div>
-		<p class="hint" id="agent-queue-count"></p>
-
-		<div class="ring big" id="agent-ring" hidden>
-			<div>
-				<strong>📞 전화가 왔습니다</strong>
-				<span id="ring-call" class="mono"></span>
-				<span class="countdown" id="ring-countdown"></span>
-			</div>
-			<div class="row">
-				<button id="agent-accept" class="primary big-button">받기</button>
-				<button id="agent-reject" class="danger big-button">거절</button>
-			</div>
-		</div>
-
-		<div class="incall" id="agent-incall" hidden>
-			<div class="incall-info">통화 중 <strong id="agent-call"></strong> · <span class="mono" id="agent-timer"></span>
-				· 민원인 음성 지연 <strong id="agent-delay"></strong></div>
-			<div class="meter"><div class="meter-fill" id="agent-meter"></div></div>
-			<div class="row">
-				<button id="agent-mute" class="warn big-button" title="단축키 M">위험 구간 차단</button>
-				<button id="agent-hangup" class="danger">끊기</button>
-			</div>
-			<p class="hint">차단은 아직 내 귀에 오지 않은 민원인 음성을 무음으로 바꿉니다. 실제 서비스에서는 AI(STT·위험 탐지)가 자동으로 부릅니다.</p>
-		</div>
-	</section>
-
-	<section class="panel timeline-panel">
-		<div class="panel-head">
-			<h2>내가 들은 소리 (최근 10초)</h2>
-			<div class="legend">
-				<span><i class="sw sw-heard"></i>들은 소리</span>
-				<span><i class="sw sw-mute"></i>차단</span>
-			</div>
-		</div>
-		<canvas id="timeline" class="short"></canvas>
-	</section>
-
-	<details class="panel">
-		<summary>주고받은 메시지 (개발용)</summary>
-		<ol class="log" id="agent-log"></ol>
-	</details>
-</main>
+		</main>
+	</div>
+</div>
 <script src="console.js"></script>
 </body>
 </html>

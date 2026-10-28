@@ -20,7 +20,9 @@ class TestConsoleDisabledTest {
 	@Test
 	@DisplayName("끄면 콘솔 파일, 현황·STT 기록 API가 모두 404")
 	void disabled() throws Exception {
-		mockMvc.perform(get("/test/index.html")).andExpect(status().isNotFound());
+		for (String page : new String[] { "index.html", "agent.html", "citizen.html", "console.html", "console.js" }) {
+			mockMvc.perform(get("/test/" + page)).andExpect(status().isNotFound());
+		}
 		mockMvc.perform(get("/test")).andExpect(status().isNotFound());
 		mockMvc.perform(get("/api/v1/status")).andExpect(status().isNotFound());
 		mockMvc.perform(get("/api/v1/stt/recordings")).andExpect(status().isNotFound());
