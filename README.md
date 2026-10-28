@@ -4,6 +4,7 @@ GovTech Korea 공모전 출품작 **모민(MOMIN, 모두의 민원)**의 음성 
 민원인 앱과 상담원 앱의 통화 음성을 WebSocket으로 중계하면서, 민원인 음성을 실시간으로 STT·위험 탐지로 넘깁니다.
 
 - **앱 개발자용 연동 규격: [docs/app-integration.md](docs/app-integration.md)**
+- **STT·위험 탐지 담당용 연동 규격: [docs/stt-integration.md](docs/stt-integration.md)** (초안)
 
 ## 필요한 것
 
