@@ -102,6 +102,9 @@ public class CallCoordinator {
 		}
 		int muted = line.mute(fromEpochMs == null ? Long.MIN_VALUE : fromEpochMs,
 				toEpochMs == null ? Long.MAX_VALUE : toEpochMs);
+		if (line.isClosed()) {
+			return OptionalInt.empty(); // 조회와 적용 사이에 통화가 끝났다
+		}
 		log.info("음성 차단: {} {}프레임 [{} ~ {}]", callId, muted, fromEpochMs, toEpochMs);
 		return OptionalInt.of(muted);
 	}
@@ -117,6 +120,9 @@ public class CallCoordinator {
 			return OptionalInt.empty();
 		}
 		int muted = line.setHold(hold);
+		if (line.isClosed()) {
+			return OptionalInt.empty(); // 조회와 적용 사이에 통화가 끝났다
+		}
 		log.info("음성 차단 유지 {}: {} (대기 프레임 {}개 무음)", hold ? "켜기" : "끄기", callId, muted);
 		return OptionalInt.of(muted);
 	}

@@ -109,9 +109,13 @@ class CallAudioControllerTest {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("{\"hold\":true}"))
 				.andExpect(status().isNotFound());
-		mockMvc.perform(put("/api/v1/calls/call-1/mute-hold")
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("{}"))
+		for (String body : new String[] { "{}", "{\"hold\":null}" }) {
+			mockMvc.perform(put("/api/v1/calls/call-1/mute-hold")
+							.contentType(MediaType.APPLICATION_JSON)
+							.content(body))
+					.andExpect(status().isBadRequest());
+		}
+		mockMvc.perform(put("/api/v1/calls/call-1/mute-hold"))
 				.andExpect(status().isBadRequest());
 	}
 }

@@ -433,6 +433,21 @@ class CallCoordinatorTest {
 		}
 
 		@Test
+		@DisplayName("차단 유지 중 통화가 끝나고 새 통화가 연결되면 새 통화는 차단 없이 시작한다")
+		void holdDoesNotLeakToNextCall() {
+			coordinator.holdMute("call-1", true);
+			coordinator.handle(citizen, new ClientMessage.Hangup("call-1"));
+			FakeConnection next = citizen("call-2");
+			coordinator.handle(agent, new ClientMessage.Accept("call-2"));
+
+			assertThat(coordinator.holdMute("call-1", false)).isEmpty();
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isFalse();
+			coordinator.relayAudio(next, frame(7));
+			elapse(DELAY_MS);
+			assertThat(agent.audio).containsExactly(frame(7));
+		}
+
+		@Test
 		@DisplayName("640바이트가 아닌 프레임은 INVALID_FRAME")
 		void invalidFrame() {
 			assertThatThrownBy(() -> coordinator.relayAudio(citizen, new byte[100]))

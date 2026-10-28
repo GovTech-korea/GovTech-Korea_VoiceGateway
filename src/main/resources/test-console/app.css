@@ -340,3 +340,4 @@ input:focus, select:focus { border-color: var(--accent); outline: none; }
 .flow li { counter-increment: f; display: flex; align-items: center; gap: 8px; }
 .flow li::before { content: counter(f); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; background: var(--page-text); color: var(--page); }
 .landing-foot { text-align: center; color: var(--page-text-2); font-size: 13px; margin-top: 28px; }
+.mute-btn:disabled { opacity: 0.85; }

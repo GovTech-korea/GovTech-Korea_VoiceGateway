@@ -81,7 +81,7 @@ class CallAudioDelayIntegrationTest {
 
 		assertThat(putHold("hold-call", true).statusCode()).isEqualTo(200);
 		citizen.sendBinary(filled(5));
-		Thread.sleep(50);
+		awaitPendingFrames("hold-call", 1); // 프레임이 지연 버퍼에 들어간 뒤 끈다
 		assertThat(putHold("hold-call", false).body()).contains("\"hold\":false");
 		citizen.sendBinary(filled(6));
 
@@ -90,6 +90,20 @@ class CallAudioDelayIntegrationTest {
 
 		agent.close();
 		citizen.close();
+	}
+
+	private void awaitPendingFrames(String callId, int count) throws Exception {
+		long deadline = System.nanoTime() + 2_000_000_000L;
+		while (System.nanoTime() < deadline) {
+			String status = HttpClient.newHttpClient().send(
+					HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/status")).build(),
+					HttpResponse.BodyHandlers.ofString()).body();
+			if (status.matches("(?s).*\"callId\":\"" + callId + "\".*\"pendingFrames\":[" + count + "-9]\\d*.*")) {
+				return;
+			}
+			Thread.sleep(10);
+		}
+		throw new AssertionError("지연 버퍼에 프레임이 들어오지 않음");
 	}
 
 	private HttpResponse<String> putHold(String callId, boolean hold) throws Exception {

@@ -418,6 +418,7 @@ const agent = {
 	micGeneration: 0,
 	stopTimer: null,
 	hold: false,
+	holdPending: false,
 	player: new Player(),
 	log: $('agent-log'),
 };
@@ -571,23 +572,41 @@ async function agentMute() {
 	}
 }
 
-/** 차단 유지 켜기/끄기. 켜 두는 동안 민원인 목소리가 상담원에게 들리지 않는다 */
+/**
+ * 차단 유지 켜기/끄기. 켜 두는 동안 민원인 목소리가 상담원에게 들리지 않는다.
+ * 요청은 한 번에 하나만 보낸다 (빠르게 여러 번 누르면 요청 순서가 뒤바뀌어 화면과 서버 상태가 어긋날 수 있다).
+ * 화면은 먼저 바꾸고, 응답이 오면 서버가 돌려준 상태로 맞춘다. 그 사이 통화가 바뀌었으면 응답은 무시한다.
+ */
 async function toggleHold() {
-	if (!agent.callId) return;
+	if (!agent.callId || agent.state !== 'IN_CALL' || agent.holdPending) return;
+	const callId = agent.callId;
 	const on = !agent.hold;
+	agent.holdPending = true;
+	setHoldBusy(true);
 	setHold(on);
 	try {
-		const res = await fetch(`/api/v1/calls/${encodeURIComponent(agent.callId)}/mute-hold`, {
+		const res = await fetch(`/api/v1/calls/${encodeURIComponent(callId)}/mute-hold`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ hold: on }),
 		});
+		if (agent.callId !== callId) return;
 		if (!res.ok) throw new Error(`HTTP ${res.status}`);
-		logTo(agent.log, 'sys', on ? '차단 유지 켬' : '차단 유지 끔');
+		const body = await res.json();
+		setHold(body.hold);
+		logTo(agent.log, 'sys', body.hold ? `차단 유지 켬 (대기 중이던 ${body.mutedFrames}프레임 무음)` : '차단 유지 끔');
 	} catch (e) {
-		setHold(!on); // 서버에 반영되지 않았으면 화면도 되돌린다
+		if (agent.callId === callId) setHold(!on); // 서버에 반영되지 않았으면 화면도 되돌린다
 		logTo(agent.log, 'err', `차단 유지 실패: ${e.message}`);
+	} finally {
+		agent.holdPending = false;
+		setHoldBusy(false);
 	}
+}
+
+function setHoldBusy(busy) {
+	const button = $('agent-hold');
+	if (button) button.disabled = busy;
 }
 
 function setHold(on) {
@@ -624,9 +643,9 @@ $('agent-mic').onchange = (e) => {
 document.addEventListener('keydown', (e) => {
 	const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement;
 	if ((e.key === 'm' || e.key === 'M') && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !typing && agent.state === 'IN_CALL') {
-		// 차단 유지 버튼이 있는 화면(상담원 앱)은 켜기/끄기, 없으면 한 번 차단
-		if ($('agent-hold')) toggleHold();
-		else agentMute();
+		// 상담원 앱은 켜기/끄기, 통합 콘솔은 한 번 차단 (차단 유지는 버튼으로)
+		if (HAS_CITIZEN) agentMute();
+		else toggleHold();
 	}
 });
 }

@@ -46,12 +46,11 @@ public final class DelayLine {
 		if (closed) {
 			return;
 		}
-		if (hold) {
-			frame = new byte[frame.length];
-			mutedTotal++;
-		}
 		if (delayNanos == 0) {
-			target.accept(frame);
+			if (hold) {
+				mutedTotal++;
+			}
+			target.accept(hold ? new byte[frame.length] : frame);
 			return;
 		}
 		if (pending.size() >= capacity) {
@@ -60,7 +59,12 @@ public final class DelayLine {
 			}
 			return;
 		}
-		pending.addLast(new Frame(frame, nowNanos + delayNanos, receivedAtMillis));
+		Frame entry = new Frame(frame, nowNanos + delayNanos, receivedAtMillis);
+		// 차단 유지 중이면 처음부터 무음 처리된 프레임으로 넣어, 나중에 다시 차단해도 두 번 세지 않게 한다
+		if (hold && entry.mute()) {
+			mutedTotal++;
+		}
+		pending.addLast(entry);
 	}
 
 	/** 내보낼 때가 된 프레임을 받은 순서대로 내보낸다. */
@@ -104,6 +108,11 @@ public final class DelayLine {
 
 	public synchronized boolean isHold() {
 		return hold;
+	}
+
+	/** 통화가 끝나 닫혔는지. 닫힌 버퍼에 한 차단은 아무 효과가 없다 */
+	public synchronized boolean isClosed() {
+		return closed;
 	}
 
 	/** 통화 종료: 남은 프레임은 버린다. */

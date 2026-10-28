@@ -161,4 +161,27 @@ class DelayLineTest {
 
 		assertThat(received).containsExactly(new byte[640]);
 	}
+
+	@Test
+	@DisplayName("차단 유지를 다시 켜거나 그 중에 한 번 차단해도 이미 무음인 프레임은 다시 세지 않는다")
+	void holdDoesNotDoubleCount() {
+		line.setHold(true);
+		line.offer(frame(1), 0, 1000);
+
+		assertThat(line.setHold(true)).isZero();
+		assertThat(line.muteAll()).isZero();
+		assertThat(line.mutedCount()).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("차단 유지 중 상한을 넘어 버린 프레임은 무음 수에 들어가지 않는다")
+	void droppedNotCountedAsMuted() {
+		line.setHold(true);
+		for (int i = 0; i < 80 + 3; i++) {
+			line.offer(frame(1), 0, 1000);
+		}
+
+		assertThat(line.mutedCount()).isEqualTo(80);
+		assertThat(line.droppedCount()).isEqualTo(3);
+	}
 }
