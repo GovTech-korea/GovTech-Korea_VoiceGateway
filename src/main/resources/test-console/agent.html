@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>상담원 화면 · Voice Gateway</title>
+<link rel="stylesheet" href="console.css">
+</head>
+<body>
+<main class="solo">
+	<header class="solo-head">
+		<a class="back" href="index.html">← 역할 선택</a>
+		<div class="server">
+			<span class="dot" id="server-dot"></span>
+			<span id="server-text">상태 확인 중</span>
+		</div>
+	</header>
+	<h1>🎧 상담원 화면</h1>
+
+	<ol class="steps compact">
+		<li>이름(상담원 ID)을 확인하고 <strong>접속</strong>을 누릅니다 → "대기 중"</li>
+		<li>민원인이 전화를 걸면 벨이 울립니다. <strong>20초 안에 받기</strong>를 누르세요 (안 받으면 다음 상담원에게 넘어가고 "자리 비움"이 됩니다)</li>
+		<li>통화 중 민원인 목소리는 <strong>약 <span id="delay-ms">0.8초</span> 늦게</strong> 들립니다. 위험한 말이 나오면 바로 <strong>위험 구간 차단</strong>(키보드 M)</li>
+		<li><strong>내 마이크 보내기</strong>가 켜져 있으면 내 목소리가 민원인에게 갑니다. 스피커로 들으면 민원인 목소리가 다시 마이크로 들어가니 <strong>이어폰</strong>을 권장합니다</li>
+	</ol>
+
+	<section class="panel" id="agent-panel">
+		<div class="panel-head">
+			<h2>상태</h2>
+			<span class="badge" id="agent-state">연결 안 됨</span>
+		</div>
+		<div class="row">
+			<label>상담원 ID <input id="agent-id" maxlength="64"></label>
+			<button id="agent-connect" class="primary">접속</button>
+			<button id="agent-disconnect">접속 끊기</button>
+		</div>
+		<div class="row">
+			<button id="agent-ready">대기(READY)</button>
+			<button id="agent-away">자리 비움(AWAY)</button>
+			<label class="check"><input type="checkbox" id="agent-mic" checked> 내 마이크 보내기</label>
+		</div>
+		<p class="hint" id="agent-queue-count"></p>
+
+		<div class="ring big" id="agent-ring" hidden>
+			<div>
+				<strong>📞 전화가 왔습니다</strong>
+				<span id="ring-call" class="mono"></span>
+				<span class="countdown" id="ring-countdown"></span>
+			</div>
+			<div class="row">
+				<button id="agent-accept" class="primary big-button">받기</button>
+				<button id="agent-reject" class="danger big-button">거절</button>
+			</div>
+		</div>
+
+		<div class="incall" id="agent-incall" hidden>
+			<div class="incall-info">통화 중 <strong id="agent-call"></strong> · <span class="mono" id="agent-timer"></span>
+				· 민원인 음성 지연 <strong id="agent-delay"></strong></div>
+			<div class="meter"><div class="meter-fill" id="agent-meter"></div></div>
+			<div class="row">
+				<button id="agent-mute" class="warn big-button" title="단축키 M">위험 구간 차단</button>
+				<button id="agent-hangup" class="danger">끊기</button>
+			</div>
+			<p class="hint">차단은 아직 내 귀에 오지 않은 민원인 음성을 무음으로 바꿉니다. 실제 서비스에서는 AI(STT·위험 탐지)가 자동으로 부릅니다.</p>
+		</div>
+	</section>
+
+	<section class="panel timeline-panel">
+		<div class="panel-head">
+			<h2>내가 들은 소리 (최근 10초)</h2>
+			<div class="legend">
+				<span><i class="sw sw-heard"></i>들은 소리</span>
+				<span><i class="sw sw-mute"></i>차단</span>
+			</div>
+		</div>
+		<canvas id="timeline" class="short"></canvas>
+	</section>
+
+	<details class="panel">
+		<summary>주고받은 메시지 (개발용)</summary>
+		<ol class="log" id="agent-log"></ol>
+	</details>
+</main>
+<script src="console.js"></script>
+</body>
+</html>
