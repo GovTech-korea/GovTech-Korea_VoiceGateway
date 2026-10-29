@@ -16,7 +16,7 @@ class SttRelayTest {
 	private final FakeSttGateway gateway = new FakeSttGateway();
 
 	private SttRelay relay(SttAudioFormat format) {
-		return new SttRelay(new SttProperties(format, null), gateway);
+		return new SttRelay(new SttProperties(format, null, null), java.util.List.of(gateway));
 	}
 
 	private static byte[] frame(int value) {
@@ -28,7 +28,7 @@ class SttRelayTest {
 	@Test
 	@DisplayName("PCM16_16K면 받은 바이트를 그대로, 통화 ID·화자·순번·시각과 함께 보낸다")
 	void passThrough16k() {
-		SttRelay.Session session = relay(SttAudioFormat.PCM16_16K).open("call-1");
+		SttRelay.Session session = relay(SttAudioFormat.PCM16_16K).open("call-1", SttListener.NONE);
 
 		session.accept(frame(1), 1_000);
 		session.accept(frame(2), 1_020);
@@ -44,7 +44,7 @@ class SttRelayTest {
 	@Test
 	@DisplayName("PCM16_8K면 20ms 조각이 320바이트가 된다")
 	void downsamples8k() {
-		SttRelay.Session session = relay(SttAudioFormat.PCM16_8K).open("call-1");
+		SttRelay.Session session = relay(SttAudioFormat.PCM16_8K).open("call-1", SttListener.NONE);
 
 		session.accept(new byte[640], 1_000);
 
@@ -56,7 +56,7 @@ class SttRelayTest {
 	@Test
 	@DisplayName("STT 쪽에서 예외가 나도 밖으로 던지지 않는다 (상담 통화는 계속)")
 	void swallowsSttFailure() {
-		SttGateway failing = (callId, format) -> new SttStream() {
+		SttGateway failing = (callId, format, listener) -> new SttStream() {
 			@Override
 			public void send(SttChunk chunk) {
 				throw new IllegalStateException("STT 연결 끊김");
@@ -67,7 +67,7 @@ class SttRelayTest {
 				throw new IllegalStateException("STT 연결 끊김");
 			}
 		};
-		SttRelay.Session session = new SttRelay(new SttProperties(SttAudioFormat.PCM16_16K, null), failing).open("call-1");
+		SttRelay.Session session = new SttRelay(new SttProperties(SttAudioFormat.PCM16_16K, null, null), java.util.List.of(failing)).open("call-1", SttListener.NONE);
 
 		assertThatCode(() -> {
 			session.accept(frame(1), 1_000);
@@ -77,9 +77,31 @@ class SttRelayTest {
 	}
 
 	@Test
+	@DisplayName("한 연결부가 실패해도 다른 연결부는 조각을 받는다")
+	void oneGatewayFailureDoesNotBlockOthers() {
+		SttGateway failing = (callId, format, listener) -> new SttStream() {
+			@Override
+			public void send(SttChunk chunk) {
+				throw new IllegalStateException("기록 실패");
+			}
+
+			@Override
+			public void close() {
+			}
+		};
+		SttRelay.Session session = new SttRelay(new SttProperties(SttAudioFormat.PCM16_16K, null, null),
+				java.util.List.of(failing, gateway)).open("call-1", SttListener.NONE);
+
+		session.accept(frame(1), 1_000);
+
+		assertThat(gateway.chunks("call-1")).hasSize(1);
+		assertThat(session.failureCount()).isEqualTo(1);
+	}
+
+	@Test
 	@DisplayName("닫은 뒤에는 보내지 않고, 여러 번 닫아도 스트림은 한 번만 닫는다")
 	void closeOnce() {
-		SttRelay.Session session = relay(SttAudioFormat.PCM16_16K).open("call-1");
+		SttRelay.Session session = relay(SttAudioFormat.PCM16_16K).open("call-1", SttListener.NONE);
 
 		session.close();
 		session.close();

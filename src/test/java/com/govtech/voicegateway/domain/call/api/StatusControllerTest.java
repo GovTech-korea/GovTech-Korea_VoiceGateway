@@ -21,17 +21,20 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.govtech.voicegateway.domain.call.AgentState;
 import com.govtech.voicegateway.domain.call.CallCenterSnapshot;
 import com.govtech.voicegateway.domain.call.CallCoordinator;
+import com.govtech.voicegateway.domain.stt.SttEndpoint;
 import com.govtech.voicegateway.domain.stt.SttProperties;
 import com.govtech.voicegateway.global.config.VoiceGatewayProperties;
 
 @WebMvcTest(StatusController.class)
 @Import(StatusControllerTest.Properties.class)
-@TestPropertySource(properties = { "voicegateway.delay-ms=500", "voicegateway.stt.format=PCM16_8K" })
+@TestPropertySource(properties = { "voicegateway.delay-ms=500", "voicegateway.stt.format=PCM16_8K",
+		"voicegateway.stt.url=https://stt.example.com" })
 class StatusControllerTest {
 
 	/** @WebMvcTest는 설정 record를 등록하지 않아 직접 켠다 */
 	@TestConfiguration
 	@EnableConfigurationProperties({ VoiceGatewayProperties.class, SttProperties.class })
+	@Import(SttEndpoint.class)
 	static class Properties {
 	}
 
@@ -54,6 +57,7 @@ class StatusControllerTest {
 				.andExpect(jsonPath("$.delayMs").value(500))
 				.andExpect(jsonPath("$.sttFormat").value("PCM16_8K"))
 				.andExpect(jsonPath("$.sttRecording").value(false))
+				.andExpect(jsonPath("$.sttUrl").value("wss://stt.example.com/ws/transcribe?language=ko-KR"))
 				.andExpect(jsonPath("$.agents[0].state").value("IN_CALL"))
 				.andExpect(jsonPath("$.queue[0]").value("call-2"))
 				.andExpect(jsonPath("$.calls[0].sttBytes").value(16_000))

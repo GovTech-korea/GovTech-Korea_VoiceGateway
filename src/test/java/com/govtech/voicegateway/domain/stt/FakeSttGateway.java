@@ -12,11 +12,19 @@ public class FakeSttGateway implements SttGateway {
 
 	private final Map<String, Stream> streams = new HashMap<>();
 
+	private final Map<String, SttListener> listeners = new HashMap<>();
+
 	@Override
-	public SttStream open(String callId, SttAudioFormat format) {
+	public SttStream open(String callId, SttAudioFormat format, SttListener listener) {
 		Stream stream = new Stream();
 		streams.put(callId, stream);
+		listeners.put(callId, listener);
 		return stream;
+	}
+
+	/** STT 서버가 결과를 돌려준 것처럼 리스너를 부를 때 쓴다 */
+	public SttListener listener(String callId) {
+		return listeners.get(callId);
 	}
 
 	public List<SttChunk> chunks(String callId) {

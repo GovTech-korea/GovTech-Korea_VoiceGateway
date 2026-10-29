@@ -341,3 +341,22 @@ input:focus, select:focus { border-color: var(--accent); outline: none; }
 .flow li::before { content: counter(f); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; background: var(--page-text); color: var(--page); }
 .landing-foot { text-align: center; color: var(--page-text-2); font-size: 13px; margin-top: 28px; }
 .mute-btn:disabled { opacity: 0.85; }
+
+/* 실시간 자막·위험 알림 */
+.captions { background: var(--surface); border-radius: 16px; padding: 12px 14px; }
+.caption-list { list-style: none; margin: 0; padding: 0; max-height: 96px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; font-size: 15px; line-height: 1.45; }
+.caption-list:empty::before { content: "민원인이 말하면 여기에 자막이 떠요"; color: var(--text-3); font-size: 13px; }
+.caption-list li.partial { color: var(--text-2); }
+.caption-list li.risk { color: #f97066; font-weight: 600; }
+.caption-list li.risk::before { content: attr(data-label) " · "; font-size: 12px; font-weight: 700; }
+.risk-alert { display: flex; gap: 10px; align-items: flex-start; background: rgba(240, 68, 56, 0.18); border: 1px solid rgba(240, 68, 56, 0.5); border-radius: 16px; padding: 12px 14px; font-size: 13px; color: var(--text); animation: alert-in 160ms ease-out; }
+.risk-alert svg { color: #f97066; margin-top: 1px; }
+.risk-alert strong { color: #f97066; }
+@keyframes alert-in { from { transform: translateY(-4px); opacity: 0; } }
+
+/* 통화 화면이 한 화면에 들어오도록: 자막이 있으면 소리 그래프를 낮춘다 */
+.view-call { gap: 10px; }
+.view-call .listen .voice { display: none; }
+.view-call #timeline { height: 48px; }
+.view-call .protect { padding: 10px 12px; }
+.call-top .timer { font-size: 28px; }

@@ -18,9 +18,13 @@ import com.govtech.voicegateway.domain.call.message.ServerMessage;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.CallEndReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.RingCancelReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.StatusReason;
+import com.govtech.voicegateway.domain.protection.KeywordRiskDetector;
 import com.govtech.voicegateway.domain.stt.FakeSttGateway;
 import com.govtech.voicegateway.domain.stt.SttAudioFormat;
 import com.govtech.voicegateway.domain.stt.SttChunk;
+import com.govtech.voicegateway.domain.stt.SttListener;
+import com.govtech.voicegateway.domain.stt.SttRisk;
+import com.govtech.voicegateway.domain.stt.SttTranscript;
 import com.govtech.voicegateway.domain.stt.SttProperties;
 import com.govtech.voicegateway.domain.stt.SttRelay;
 import com.govtech.voicegateway.global.config.VoiceGatewayProperties;
@@ -43,9 +47,9 @@ class CallCoordinatorTest {
 		clock = new ManualClock();
 		delayLines = new DelayLines(clock::nanos);
 		stt = new FakeSttGateway();
-		SttRelay sttRelay = new SttRelay(new SttProperties(SttAudioFormat.PCM16_16K, null), stt);
+		SttRelay sttRelay = new SttRelay(new SttProperties(SttAudioFormat.PCM16_16K, null, null), java.util.List.of(stt));
 		coordinator = new CallCoordinator(new VoiceGatewayProperties(DELAY_MS, RING_TIMEOUT_MS), ringTimer, delayLines,
-				sttRelay, clock);
+				sttRelay, new KeywordRiskDetector(), clock);
 	}
 
 	/** 시간을 진행시키고 지연 버퍼에서 때가 된 음성을 내보낸다. */
@@ -445,6 +449,102 @@ class CallCoordinatorTest {
 			coordinator.relayAudio(next, frame(7));
 			elapse(DELAY_MS);
 			assertThat(agent.audio).containsExactly(frame(7));
+		}
+
+		@Test
+		@DisplayName("STT 자막은 상담원에게 그대로 보낸다")
+		void forwardsTranscriptToAgent() {
+			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "가로등이 꺼져 있어요", false, null, null));
+
+			assertThat(agent.messages).containsExactly(
+					new ServerMessage.Transcript("call-1", "call-1-0", "가로등이 꺼져 있어요", false));
+		}
+
+		@Test
+		@DisplayName("자막에 욕설이 있으면 그 발화에서 아직 안 나간 부분을 차단하고 상담원에게 한 번만 알린다")
+		void abuseInTranscriptMutesAndNotifiesOnce() {
+			long start = clock.millis();
+			coordinator.relayAudio(citizen, frame(1));
+			elapse(20);
+			coordinator.relayAudio(citizen, frame(2));
+			SttListener listener = stt.listener("call-1");
+
+			listener.onTranscript(new SttTranscript("call-1-0", "당신 개새끼", false, start, clock.millis()));
+			elapse(20);
+			coordinator.relayAudio(citizen, frame(3));
+			listener.onTranscript(new SttTranscript("call-1-0", "당신 개새끼야", true, start, clock.millis()));
+			elapse(DELAY_MS);
+
+			assertThat(agent.audio).containsExactly(new byte[640], new byte[640], new byte[640]);
+			assertThat(agent.messages).filteredOn(ServerMessage.RiskDetected.class::isInstance)
+					.singleElement()
+					.isEqualTo(new ServerMessage.RiskDetected("call-1", "call-1-0", "당신 개새끼", "ABUSE", "MEDIUM", null, "개새끼", 2));
+			assertThat(agent.messages).filteredOn(ServerMessage.Transcript.class::isInstance).hasSize(2);
+		}
+
+		@Test
+		@DisplayName("발화 시작 시각을 모르면 차단하지 않고 상담원에게 알리기만 한다")
+		void keywordWithoutStartOnlyAlerts() {
+			coordinator.relayAudio(citizen, frame(1));
+
+			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "시발", false, null, clock.millis()));
+			elapse(DELAY_MS);
+
+			assertThat(agent.audio).containsExactly(frame(1));
+			assertThat(agent.messages).filteredOn(ServerMessage.RiskDetected.class::isInstance)
+					.singleElement()
+					.satisfies(m -> assertThat(((ServerMessage.RiskDetected) m).mutedFrames()).isZero());
+		}
+
+		@Test
+		@DisplayName("확정 자막의 위험은 그 발화 끝까지만 차단하고, 뒤에 이어진 정상 발화는 그대로 들린다")
+		void finalRiskIsBounded() {
+			long start = clock.millis();
+			coordinator.relayAudio(citizen, frame(1));
+			elapse(20);
+			long end = clock.millis();
+			coordinator.relayAudio(citizen, frame(2));
+			elapse(20);
+			coordinator.relayAudio(citizen, frame(3)); // 다음 발화
+
+			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "이 병신아", true, start, end));
+			elapse(DELAY_MS);
+
+			assertThat(agent.audio).containsExactly(new byte[640], new byte[640], frame(3));
+		}
+
+		@Test
+		@DisplayName("STT 위험 판단(risk)은 준 구간을 차단하고, hold는 차단 유지를 켜며 상담원에게 알린다")
+		void riskAndHoldFromStt() {
+			long first = clock.millis();
+			coordinator.relayAudio(citizen, frame(1));
+			elapse(20);
+			coordinator.relayAudio(citizen, frame(2));
+			SttListener listener = stt.listener("call-1");
+
+			listener.onRisk(new SttRisk(first, first, "AGENT", "ABUSE", "MEDIUM", "..."));
+			listener.onHold(true);
+			coordinator.relayAudio(citizen, frame(3));
+			elapse(DELAY_MS);
+
+			assertThat(agent.audio).containsExactly(new byte[640], new byte[640], new byte[640]);
+			assertThat(agent.messages).contains(new ServerMessage.MuteHoldChanged("call-1", true));
+			assertThat(agent.messages).filteredOn(ServerMessage.RiskDetected.class::isInstance)
+					.singleElement()
+					.satisfies(m -> assertThat(((ServerMessage.RiskDetected) m).target()).isEqualTo("AGENT"));
+		}
+
+		@Test
+		@DisplayName("통화가 끝난 뒤 늦게 온 STT 결과는 무시한다")
+		void ignoresLateSttResults() {
+			SttListener listener = stt.listener("call-1");
+			coordinator.handle(citizen, new ClientMessage.Hangup("call-1"));
+			agent.clear();
+
+			listener.onTranscript(new SttTranscript("call-1-0", "개새끼", true, null, null));
+			listener.onHold(true);
+
+			assertThat(agent.messages).isEmpty();
 		}
 
 		@Test

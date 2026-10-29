@@ -1,5 +1,7 @@
 package com.govtech.voicegateway.domain.stt;
 
+import java.util.List;
+
 import org.springframework.stereotype.Component;
 
 import com.govtech.voicegateway.domain.call.Role;
@@ -8,7 +10,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 민원인 음성을 설정한 형식으로 바꿔 {@link SttGateway}로 넘긴다. 상담원 지연 버퍼보다 먼저 불러 STT가 바로 듣게 한다.
+ * 민원인 음성을 설정한 형식으로 바꿔 등록된 모든 {@link SttGateway}(기록, STT 서버 등)로 넘긴다.
+ * 상담원 지연 버퍼보다 먼저 불러 STT가 바로 듣게 한다.
  */
 @Slf4j
 @Component
@@ -16,10 +19,14 @@ import lombok.extern.slf4j.Slf4j;
 public class SttRelay {
 
 	private final SttProperties properties;
-	private final SttGateway gateway;
+	private final List<SttGateway> gateways;
 
-	public Session open(String callId) {
-		return new Session(callId, properties.format(), gateway.open(callId, properties.format()));
+	/** @param listener STT 결과(자막, 위험 구간, 차단 유지)를 받을 곳 */
+	public Session open(String callId, SttListener listener) {
+		List<SttStream> streams = gateways.stream()
+				.map(gateway -> gateway.open(callId, properties.format(), listener))
+				.toList();
+		return new Session(callId, properties.format(), streams);
 	}
 
 	/**
@@ -30,17 +37,17 @@ public class SttRelay {
 
 		private final String callId;
 		private final SttAudioFormat format;
-		private final SttStream stream;
+		private final List<SttStream> streams;
 		private final Pcm16Downsampler downsampler;
 		private volatile long sequence;
 		private volatile long bytes;
 		private volatile long failures;
 		private boolean closed;
 
-		private Session(String callId, SttAudioFormat format, SttStream stream) {
+		private Session(String callId, SttAudioFormat format, List<SttStream> streams) {
 			this.callId = callId;
 			this.format = format;
-			this.stream = stream;
+			this.streams = streams;
 			this.downsampler = format == SttAudioFormat.PCM16_8K ? new Pcm16Downsampler() : null;
 		}
 
@@ -52,15 +59,23 @@ public class SttRelay {
 			byte[] pcm = downsampler == null ? pcm16k : downsampler.process(pcm16k);
 			long seq = sequence;
 			sequence = seq + 1; // 잠금 안에서만 쓰므로 volatile 증가가 안전하다
-			try {
-				stream.send(new SttChunk(callId, Role.CITIZEN, seq, receivedAtEpochMs, format, pcm));
-				bytes = bytes + pcm.length;
-			} catch (RuntimeException e) {
-				// STT 장애가 상담 통화를 끊으면 안 된다. 조각은 버리고 순번은 건너뛴 채로 둔다
-				failures = failures + 1;
-				if (failures == 1) {
-					log.warn("STT 전달 실패: {} (이후 같은 통화의 실패는 종료 때 개수만 남김)", callId, e);
+			SttChunk chunk = new SttChunk(callId, Role.CITIZEN, seq, receivedAtEpochMs, format, pcm);
+			boolean failed = false;
+			for (SttStream stream : streams) {
+				// 한 연결부의 장애가 다른 연결부(기록, STT 서버)나 상담 통화에 번지지 않게 따로 막는다
+				try {
+					stream.send(chunk);
+				} catch (RuntimeException e) {
+					failed = true;
+					if (failures == 0) {
+						log.warn("STT 전달 실패: {} (이후 같은 통화의 실패는 종료 때 개수만 남김)", callId, e);
+					}
 				}
+			}
+			if (failed) {
+				failures = failures + 1;
+			} else {
+				bytes = bytes + pcm.length;
 			}
 		}
 
@@ -87,10 +102,12 @@ public class SttRelay {
 			if (failures > 0) {
 				log.warn("STT 전달 실패 합계: {} {}조각", callId, failures);
 			}
-			try {
-				stream.close();
-			} catch (RuntimeException e) {
-				log.warn("STT 스트림 닫기 실패: {}", callId, e);
+			for (SttStream stream : streams) {
+				try {
+					stream.close();
+				} catch (RuntimeException e) {
+					log.warn("STT 스트림 닫기 실패: {}", callId, e);
+				}
 			}
 		}
 	}

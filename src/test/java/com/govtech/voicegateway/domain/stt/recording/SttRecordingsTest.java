@@ -20,7 +20,7 @@ class SttRecordingsTest {
 	Path dir;
 
 	private SttRecordings recordings(SttAudioFormat format) {
-		return new SttRecordings(new SttProperties(format, dir));
+		return new SttRecordings(new SttProperties(format, dir, null));
 	}
 
 	@Test
@@ -82,7 +82,7 @@ class SttRecordingsTest {
 	@Test
 	@DisplayName("dump-dir을 설정하지 않으면 비어 있다")
 	void disabled() {
-		SttRecordings recordings = new SttRecordings(new SttProperties(SttAudioFormat.PCM16_16K, null));
+		SttRecordings recordings = new SttRecordings(new SttProperties(SttAudioFormat.PCM16_16K, null, null));
 
 		assertThat(recordings.enabled()).isFalse();
 		assertThat(recordings.list()).isEmpty();

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.govtech.voicegateway.domain.call.Role;
 import com.govtech.voicegateway.domain.stt.SttAudioFormat;
 import com.govtech.voicegateway.domain.stt.SttChunk;
+import com.govtech.voicegateway.domain.stt.SttListener;
 import com.govtech.voicegateway.domain.stt.SttProperties;
 import com.govtech.voicegateway.domain.stt.SttStream;
 
@@ -30,8 +31,8 @@ class RecordingSttGatewayTest {
 	@Test
 	@DisplayName("dump-dir을 주면 받은 바이트를 순서대로 <callId>-<시각>.pcm에 쓴다")
 	void dumpsToFile() throws Exception {
-		RecordingSttGateway gateway = new RecordingSttGateway(new SttProperties(SttAudioFormat.PCM16_16K, dir));
-		SttStream stream = gateway.open("call-1", SttAudioFormat.PCM16_16K);
+		RecordingSttGateway gateway = new RecordingSttGateway(new SttProperties(SttAudioFormat.PCM16_16K, dir, null));
+		SttStream stream = gateway.open("call-1", SttAudioFormat.PCM16_16K, SttListener.NONE);
 
 		stream.send(chunk(0, 1));
 		stream.send(chunk(1, 2));
@@ -48,14 +49,14 @@ class RecordingSttGatewayTest {
 	@Test
 	@DisplayName("같은 callId로 다시 열어도 이전 기록을 덮어쓰지 않는다")
 	void keepsPreviousDump() throws Exception {
-		RecordingSttGateway gateway = new RecordingSttGateway(new SttProperties(SttAudioFormat.PCM16_16K, dir));
-		SttStream first = gateway.open("call-1", SttAudioFormat.PCM16_16K);
+		RecordingSttGateway gateway = new RecordingSttGateway(new SttProperties(SttAudioFormat.PCM16_16K, dir, null));
+		SttStream first = gateway.open("call-1", SttAudioFormat.PCM16_16K, SttListener.NONE);
 		first.send(chunk(0, 1));
 		first.close();
 		awaitFile(640);
 		Thread.sleep(2); // 파일 이름의 ms가 달라지게
 
-		SttStream second = gateway.open("call-1", SttAudioFormat.PCM16_16K);
+		SttStream second = gateway.open("call-1", SttAudioFormat.PCM16_16K, SttListener.NONE);
 		second.send(chunk(0, 2));
 		second.close();
 
@@ -96,8 +97,8 @@ class RecordingSttGatewayTest {
 	@Test
 	@DisplayName("dump-dir이 없으면 파일을 만들지 않는다")
 	void noDump() throws Exception {
-		RecordingSttGateway gateway = new RecordingSttGateway(new SttProperties(SttAudioFormat.PCM16_16K, null));
-		SttStream stream = gateway.open("call-1", SttAudioFormat.PCM16_16K);
+		RecordingSttGateway gateway = new RecordingSttGateway(new SttProperties(SttAudioFormat.PCM16_16K, null, null));
+		SttStream stream = gateway.open("call-1", SttAudioFormat.PCM16_16K, SttListener.NONE);
 
 		stream.send(chunk(0, 1));
 		stream.close();

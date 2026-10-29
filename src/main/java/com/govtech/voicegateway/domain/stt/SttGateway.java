@@ -5,5 +5,8 @@ package com.govtech.voicegateway.domain.stt;
  */
 public interface SttGateway {
 
-	SttStream open(String callId, SttAudioFormat format);
+	/**
+	 * @param listener STT 결과를 받을 곳. 결과를 돌려주지 않는 연결부는 무시해도 된다
+	 */
+	SttStream open(String callId, SttAudioFormat format, SttListener listener);
 }

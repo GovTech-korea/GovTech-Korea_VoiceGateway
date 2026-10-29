@@ -101,6 +101,14 @@
 					<svg width="20" height="20"><use href="#i-shield"/></svg>
 					<p><strong>보호 중</strong> · 민원인 목소리는 <strong id="agent-delay"></strong> 늦게 들려요. 위험한 말은 들리기 전에 차단하세요.</p>
 				</div>
+				<div class="risk-alert" id="agent-risk" hidden role="alert">
+					<svg width="20" height="20"><use href="#i-shield"/></svg>
+					<p><strong id="agent-risk-title">위험 발언 감지</strong><span id="agent-risk-detail"></span></p>
+				</div>
+				<div class="captions">
+					<div class="listen-head"><span>실시간 자막</span><span id="agent-stt-state">STT 연결 안 됨</span></div>
+					<ol class="caption-list" id="agent-transcript" aria-live="polite"></ol>
+				</div>
 				<div class="listen">
 					<div class="listen-head"><span>민원인 목소리</span><span>빨간 부분 = 차단</span></div>
 					<div class="voice" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>

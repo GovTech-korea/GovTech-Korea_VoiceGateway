@@ -1,8 +1,8 @@
 # STT 연동 규격: 게이트웨이 ↔ STT·위험 탐지
 
 - 대상: STT·위험 탐지(AI) 담당
-- 버전: v0.1 초안 (2026-10-28)
-- 상태: 1~5장은 **지금 게이트웨이에 구현된 내용**이고, 6장 전송 방식은 **제안안(미구현)** 입니다. 8장 체크리스트를 같이 정한 뒤 확정합니다.
+- 버전: v0.2 (2026-10-29)
+- 상태: 1~7장 모두 **지금 게이트웨이에 구현된 내용**입니다. 6장 실시간 전송은 STT 담당 서버(streaming-asr1)의 `/ws/transcribe` 형식에 맞췄습니다. 8장은 같이 정할 것입니다.
 
 ## 1. 한눈에 보기
 
@@ -142,77 +142,56 @@ def hold(call_id: str, on: bool) -> None:
 
 > 지금은 인증이 없습니다. 시험용 주소는 팀 안에서만 공유합니다.
 
-## 6. 전송 방식: 게이트웨이 → STT 서버 (제안안, 미구현)
+## 6. 실시간 전송: 게이트웨이 → STT 서버 (구현됨)
 
-지금 게이트웨이는 STT로 보낼 음성을 **파일로만 저장**합니다(7장). 실제 STT로 실시간 전송하는 방식으로 아래를 제안합니다. 의견을 주시면 맞춰서 구현합니다.
+게이트웨이는 **STT 담당 서버(streaming-asr1)의 `/ws/transcribe`에 통화마다 WebSocket으로 접속**합니다. STT 서버 쪽은 고칠 것이 없습니다.
 
 ### 6.1 연결
 
-- **STT 쪽이 WebSocket 서버**를 열고, **게이트웨이가 접속**합니다. 나중에 클라우드 STT를 써도 같은 방향(게이트웨이가 보내는 쪽)입니다.
-- 게이트웨이 설정에 STT 주소를 넣습니다: `voicegateway.stt.url=wss://<STT 서버>/stt`
-- **통화 하나에 연결 하나.** 통화가 연결될 때 접속하고, 통화가 끝나면 닫습니다.
-- Colab에서 띄울 때는 cloudflared 임시 터널로 `wss://xxxx.trycloudflare.com` 주소를 만들면 됩니다 (부록 A).
+- STT 서버 주소는 **실행 중에 바꿀 수 있습니다** (Colab·ngrok 주소가 바뀌어도 게이트웨이를 다시 켜지 않음). 다음에 연결되는 통화부터 적용됩니다.
+  - 화면: 통합 콘솔(`/test/console.html`) → "STT 서버"에 Colab이 출력한 `https://…` 주소를 넣고 적용
+  - API: `PUT /api/v1/stt/endpoint` `{"url": "https://xxxx.ngrok-free.app"}` (비우면 끔), 확인은 `GET /api/v1/stt/endpoint`
+  - 설정 파일: `voicegateway.stt.url` (시작할 때의 주소)
+- 넣은 주소는 자동으로 맞춥니다: `https` → `wss`, `http` → `ws`, 경로가 없으면 `/ws/transcribe`, 쿼리가 없으면 `language=ko-KR`
+- 상담원이 전화를 받을 때 접속하고, 통화가 끝나면 `{"type":"stop"}`을 보낸 뒤 닫습니다. ngrok 안내 페이지를 건너뛰도록 `ngrok-skip-browser-warning` 헤더를 붙입니다.
 
-### 6.2 게이트웨이 → STT 메시지
+### 6.2 게이트웨이 → STT
 
-**① 시작 (텍스트, 접속 직후 한 번)**
-```json
-{
-  "type": "start",
-  "callId": "call-0001",
-  "speaker": "CITIZEN",
-  "format": "PCM16_16K",
-  "sampleRate": 16000,
-  "frameMs": 20,
-  "delayMs": 800
-}
-```
-`delayMs`는 상담원 지연 시간입니다. 이 안에 판단해야 차단이 됩니다.
-
-**② 음성 조각 (바이너리, 20ms마다)**
-
-| 바이트 | 내용 |
+| 메시지 | 내용 |
 |---|---|
-| 0~3 | `sequence` (uint32, little-endian) |
-| 4~11 | `receivedAtEpochMs` (int64, little-endian) |
-| 12~ | PCM (2장 형식, 16kHz면 640바이트) |
+| 바이너리 | 16kHz 모노 int16 little-endian PCM, **100ms(3200바이트)씩** (20ms 조각 5개를 묶음, 헤더 없음) |
+| 텍스트 `{"type":"stop"}` | 통화 종료 |
 
-```python
-import struct
-seq, received_at = struct.unpack_from("<Iq", message, 0)
-pcm = message[12:]
-```
+- 접속이 끝나기 전에 들어온 음성은 최대 5초까지 모아 두었다가 순서대로 보냅니다.
+- `voicegateway.stt.format=PCM16_8K`이면 STT 서버로는 보내지 않습니다 (서버가 16kHz만 받음).
 
-**③ 끝 (텍스트, 통화 종료 시)**
+### 6.3 STT → 게이트웨이
+
+| 메시지 | 게이트웨이가 하는 일 |
+|---|---|
+| `{"type":"ready",...}` | 없음 (16kHz가 아니면 경고 로그) |
+| `{"type":"speech_start","id":0,"audio_start":2.4}` | 발화 시작 초를 조각 순번(÷20ms)으로 바꿔, **그 조각을 받은 시각**을 기억 |
+| `{"type":"partial","id":0,"text":"안녕하세"}` | 상담원 앱에 자막(`transcript`, `final:false`) 전달 + 위험 단어 검사 |
+| `{"type":"final","id":0,"text":"안녕하세요."}` | 상담원 앱에 자막(`final:true`) 전달 + 위험 단어 검사, 로그에 문장 기록 |
+| `{"type":"discard","id":1}` | 그 발화를 잊음 |
+| `{"type":"error","message":"..."}` | 경고 로그 |
+
+**위험 판단 (지금은 게이트웨이의 1차 키워드 필터)**
+
+- STT 서버는 아직 위험 판단을 하지 않으므로, 게이트웨이가 자막 글자에서 욕설(`ABUSE`/`MEDIUM`)·위협(`THREAT`/`HIGH`) 단어를 찾습니다. 띄어쓰기는 지우고 비교합니다.
+- 찾으면 **그 발화의 시작 시각부터 아직 상담원에게 나가지 않은 부분을 차단**하고, 상담원 앱에 `risk-detected`를 한 번 보냅니다. 같은 발화의 중간 결과가 더 오면 그 사이 들어온 부분도 이어서 차단합니다.
+- 정상 민원에도 나오는 말("꺼져 있어요" 등)은 목록에 넣지 않았습니다 (오탐 방지).
+- 문맥 판단(누구를 향했는지 등)은 LLM의 몫입니다. 위험 판단을 STT 쪽에서 보내고 싶으면, 같은 연결로 아래 메시지를 보내면 게이트웨이가 그대로 처리합니다 (선택, 협의).
+
 ```json
-{"type": "end", "callId": "call-0001", "reason": "HANGUP_CITIZEN", "chunks": 1520}
-```
-`reason`: `HANGUP_CITIZEN`, `HANGUP_AGENT`, `DISCONNECTED`. 이 메시지 뒤 게이트웨이가 연결을 닫습니다.
-
-### 6.3 STT → 게이트웨이 메시지 (같은 연결, 텍스트 JSON)
-
-**위험 구간 (한 번 차단, 5.1과 같은 동작)**
-```json
-{"type": "risk", "fromEpochMs": 1793025159393, "toEpochMs": 1793025159993, "label": "ABUSE", "score": 0.93}
-```
-- `fromEpochMs`/`toEpochMs`: 위험 구간에 해당하는 조각들의 `receivedAtEpochMs` 중 처음과 끝
-- `label`, `score`: 선택. 게이트웨이는 기록만 하고, 나중에 상담원 화면에 보여 줄 수 있음
-
-**차단 유지 (5.2와 같은 동작)**
-```json
+{"type": "risk", "fromEpochMs": 1793025159393, "toEpochMs": 1793025159993, "target": "AGENT", "riskType": "ABUSE", "severity": "MEDIUM", "text": "..."}
 {"type": "hold", "on": true}
 ```
-
-**인식 결과 (선택)**
-```json
-{"type": "transcript", "fromSequence": 100, "toSequence": 152, "text": "...", "final": true}
-```
-지금은 기록만 합니다. 상담 기록·상담원 화면 자막 등에 쓸지는 협의합니다.
+`risk`는 5.1 한 번 차단과, `hold`는 5.2 차단 유지와 같고, 상담원 앱에 각각 `risk-detected`, `mute-hold-changed`가 갑니다.
 
 ### 6.4 오류와 끊김
 
-- STT 서버에 접속하지 못하거나 연결이 끊겨도 **통화는 계속됩니다.** 그 통화는 STT 없이 진행합니다 (MVP는 통화 중 재접속 없음).
-- STT 쪽이 처리하지 못하는 메시지는 무시해도 됩니다. 게이트웨이도 모르는 `type`은 무시합니다.
+- STT 서버에 접속하지 못하거나(10초 안에 응답 없음 포함) 연결이 끊겨도 **통화는 계속됩니다.** 그 통화는 자막 없이 진행합니다 (통화 중 재접속 없음). 로그에 `STT 서버 연결 실패`가 남습니다.
 
 ## 7. 지금 바로 시험하는 방법
 
@@ -240,58 +219,35 @@ ffmpeg -f s16le -ar 16000 -ac 1 -i call-0001-1793025159391.pcm out.wav  # WAV로
 ## 8. 같이 정할 것 (체크리스트)
 
 - [ ] **샘플링**: 모델이 16kHz를 받는지, 8kHz를 받는지 → 게이트웨이 설정 하나로 바꿈
-- [ ] **전송 방식**: 6장 제안대로 갈지, 다른 방식(gRPC, 클라우드 STT API 등)인지
+- [x] **전송 방식**: streaming-asr1의 `/ws/transcribe` 형식으로 연결 (6장, 2026-10-29)
 - [ ] **결과 형식**: 시각 구간(`fromEpochMs`/`toEpochMs`)으로 줄지, 순번(`sequence`)으로 줄지
 - [ ] **판단 시간**: 조각을 받고 위험 판단까지 얼마나 걸리는지. 0.8초를 넘으면 지연을 늘릴지 (늘리면 통화가 더 늦게 들림)
 - [ ] **부분 결과**: 말이 끝나기 전에 판단이 필요한지 (스트리밍 STT 여부)
 - [ ] **상담원 음성**: 상담원 목소리도 STT가 필요한지 (지금은 민원인만)
 - [ ] **차단 방식**: 위험하면 그 구간만 지울지(`risk`), 일정 시간 계속 막을지(`hold`)
 
-## 부록 A. Colab에서 받는 쪽 예시 (6장 제안안 기준)
+## 부록 A. Colab STT 서버와 연결하기
 
-모델 자리는 비워 두고, 처음에는 "소리가 크면 위험"이라는 가짜 판단으로 흐름만 확인하는 예시입니다.
+1. STT 담당 노트북 `streaming_asr1_colab.ipynb`를 Colab에서 열고 위에서부터 실행 (T4 GPU, 보안 비밀 `NGROK_AUTHTOKEN`)
+2. 셀 3이 출력한 `웹 클라이언트 : https://xxxx.ngrok-free.app` 주소를 복사
+3. 게이트웨이 통합 콘솔(`/test/console.html`) → "STT 서버"에 붙여 넣고 **적용**
+4. 상담원·민원인 화면에서 통화 → 상담원 화면 "실시간 자막"에 글자가 뜨는지 확인
 
-```python
-# 셀 1: 준비
-!pip -q install websockets numpy
-!wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared && chmod +x cloudflared
+ngrok 무료 주소는 노트북을 다시 실행할 때마다 바뀔 수 있습니다 (`NGROK_DOMAIN`을 쓰면 고정). 바뀌면 3번만 다시 하면 됩니다.
+
+## 부록 B. 모델 없이 시험하기: 가짜 STT 서버
+
+`tools/mock-stt/mock_stt_server.py`는 위 서버와 같은 형식으로 **정해진 대사**(정상 민원, 욕설, 위협)를 자막처럼 돌려줍니다. GPU·모델 없이 연결, 자막, 자동 차단을 확인할 때 씁니다.
+
+```bash
+pip install websockets
+python tools/mock-stt/mock_stt_server.py           # ws://localhost:8100/ws/transcribe
 ```
-
-```python
-# 셀 2: STT 서버 (모델은 detect 함수에)
-import asyncio, json, struct
-import numpy as np
-import websockets
-
-def detect(audio: np.ndarray) -> bool:
-    """여기에 STT + 위험 판단 모델. 지금은 소리 크기로 흉내만 낸다."""
-    return float(np.sqrt(np.mean(audio ** 2))) > 0.3
-
-async def handle(ws):
-    start = json.loads(await ws.recv())
-    print("start", start)
-    async for message in ws:
-        if isinstance(message, bytes):
-            seq, received_at = struct.unpack_from("<Iq", message, 0)
-            audio = np.frombuffer(message[12:], dtype="<i2").astype(np.float32) / 32768.0
-            if detect(audio):
-                await ws.send(json.dumps({"type": "risk", "fromEpochMs": received_at, "toEpochMs": received_at}))
-        else:
-            event = json.loads(message)
-            if event["type"] == "end":
-                print("end", event)
-
-server = await websockets.serve(handle, "0.0.0.0", 8765)
-```
-
-```python
-# 셀 3: 공개 주소 만들기 → 출력된 https://xxxx.trycloudflare.com 을 wss://xxxx.trycloudflare.com/stt 로 게이트웨이에 설정
-!nohup ./cloudflared tunnel --url http://localhost:8765 > tunnel.log 2>&1 &
-!sleep 8 && grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log
-```
+통합 콘솔의 "STT 서버"에 `http://localhost:8100`을 넣고 통화하면 됩니다.
 
 ## 변경 이력
 
 | 버전 | 날짜 | 내용 |
 |---|---|---|
+| v0.2 | 2026-10-29 | 6장을 STT 담당 서버(streaming-asr1) `/ws/transcribe` 형식으로 구현, STT 주소 실행 중 변경, 키워드 1차 필터·자동 차단, 부록을 Colab 연결·가짜 STT 서버로 교체 |
 | v0.1 | 2026-10-28 | 초안. 1~5장은 구현된 내용, 6장 전송 방식은 제안안 |
