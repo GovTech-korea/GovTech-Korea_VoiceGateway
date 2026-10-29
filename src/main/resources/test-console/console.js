@@ -742,6 +742,8 @@ function citizenUi(text, kind) {
 	$('citizen-call-id').disabled = calling;
 	$('citizen-new-id').disabled = calling;
 	$('citizen-source').disabled = calling;
+	// 통화 중에는 재생 중인 파일을 바꾸지 않는다 (바꾸면 표시와 실제로 나가는 소리가 어긋난다)
+	if ($('citizen-file-button')) $('citizen-file-button').disabled = calling;
 	if (text) setBadge($('citizen-state'), text, kind);
 }
 
@@ -754,6 +756,7 @@ async function citizenCall() {
 	const source = $('citizen-source').value;
 	if (source === 'file' && !citizen.fileSamples) {
 		logTo(citizen.log, 'err', '오디오 파일을 먼저 고르세요');
+		showFileName('먼저 파일을 골라 주세요', true);
 		$('citizen-file').click();
 		return;
 	}
@@ -871,20 +874,60 @@ $('citizen-hangup').onclick = () => {
 	if (!citizen.conn) return;
 	citizen.conn.send({ type: 'hangup', callId: citizen.callId });
 };
+// 오디오 파일: "오디오 파일 재생"을 골랐을 때만 업로드 버튼을 보여 주고, 취소해도 버튼으로 다시 고른다
+const FILE_NAME_MAX = 20;
+
+function showFileName(text, warn, fullName) {
+	const label = $('citizen-file-name');
+	if (!label) return;
+	label.textContent = text;
+	label.title = fullName || '';
+	label.classList.toggle('warn', !!warn);
+}
+
+let fileGeneration = 0; // 빠르게 여러 번 고르면 마지막으로 고른 파일만 쓴다
+let loadedFileLabel = null; // 지금 쓰고 있는 파일의 표시 (못 읽는 파일을 골랐을 때 되돌린다)
+
+function shortName(name) {
+	return name.length <= FILE_NAME_MAX ? name : `${name.slice(0, FILE_NAME_MAX - 1)}…`;
+}
+
+function syncFileRow() {
+	const row = $('citizen-file-row');
+	if (row) row.hidden = $('citizen-source').value !== 'file';
+}
+
 $('citizen-source').onchange = (e) => {
-	if (e.target.value === 'file') $('citizen-file').click();
+	syncFileRow();
+	if (e.target.value === 'file' && !citizen.fileSamples) $('citizen-file').click();
 };
+if ($('citizen-file-button')) $('citizen-file-button').onclick = () => $('citizen-file').click();
+$('citizen-file').addEventListener('cancel', () => {
+	if (!citizen.fileSamples) showFileName('취소했어요. "파일 올리기"로 다시 고를 수 있어요', true);
+});
 $('citizen-file').onchange = async (e) => {
 	const file = e.target.files[0];
+	e.target.value = ''; // 같은 파일을 다시 골라도 change가 오게 비운다
 	if (!file) return;
+	const generation = ++fileGeneration;
+	showFileName('읽는 중…');
 	try {
-		citizen.fileSamples = await fileSamples(file);
-		logTo(citizen.log, 'sys', `파일 준비: ${file.name} (${(citizen.fileSamples.length / SAMPLE_RATE).toFixed(1)}초, 반복 재생)`);
+		const samples = await fileSamples(file);
+		if (generation !== fileGeneration) return; // 그 사이 다른 파일을 골랐다
+		citizen.fileSamples = samples;
+		const seconds = (samples.length / SAMPLE_RATE).toFixed(1);
+		loadedFileLabel = { text: `${shortName(file.name)} · ${seconds}초`, name: file.name };
+		showFileName(loadedFileLabel.text, false, file.name);
+		logTo(citizen.log, 'sys', `파일 준비: ${file.name} (${seconds}초, 반복 재생)`);
 	} catch (e2) {
-		citizen.fileSamples = null;
+		if (generation !== fileGeneration) return;
+		// 이미 쓰던 파일이 있으면 그대로 둔다
+		const keep = loadedFileLabel ? ` 이전 파일(${loadedFileLabel.text})을 그대로 써요` : ' 지원 형식인지 확인해 주세요';
+		showFileName(`이 파일은 읽을 수 없어요.${keep}`, true, loadedFileLabel ? loadedFileLabel.name : '');
 		logTo(citizen.log, 'err', `파일을 읽지 못함: ${e2.message}`);
 	}
 };
+syncFileRow();
 }
 
 // ---------- 게이트웨이 상태 ----------

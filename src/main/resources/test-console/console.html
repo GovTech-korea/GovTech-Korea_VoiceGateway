@@ -81,7 +81,12 @@
 					<option value="file">오디오 파일</option>
 				</select>
 			</label>
-			<input type="file" id="citizen-file" accept="audio/*" hidden>
+			<input type="file" id="citizen-file" accept=".wav,.mp3,.m4a,.aac,.ogg,.oga,.flac,.webm,audio/wav,audio/mpeg,audio/mp4,audio/ogg,audio/flac,audio/webm" hidden>
+		</div>
+		<div class="row" id="citizen-file-row" hidden>
+			<button type="button" id="citizen-file-button">파일 올리기</button>
+			<span class="mono" id="citizen-file-name">아직 고르지 않음</span>
+			<span class="hint">WAV · MP3 · M4A · OGG · FLAC (Chrome 기준)</span>
 		</div>
 		<div class="row">
 			<button id="citizen-call" class="primary">전화 걸기</button>
