@@ -244,3 +244,11 @@ details[open] > summary { margin-bottom: 10px; }
 .hold-on, [data-hold="on"] .hold-off { display: none; }
 [data-hold="on"] .hold-on { display: inline; }
 [data-hold="on"] #agent-hold { background: var(--danger); color: #fff; }
+
+.captions-log { height: 110px; margin-bottom: 8px; }
+.captions-log li { color: var(--text); }
+.captions-log li.partial { color: var(--muted); }
+.captions-log li.risk { color: var(--danger); font-weight: 600; }
+.captions-log li.risk::before { content: attr(data-label) " · "; }
+#agent-risk:not([hidden]) { color: var(--danger); }
+#stt-form input { flex: 1; min-width: 0; width: auto; }

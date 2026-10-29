@@ -56,6 +56,8 @@
 				<button id="agent-hold" class="danger" aria-pressed="false" title="켜 두는 동안 계속 차단, 다시 누르면 해제"><span class="hold-off">차단 유지</span><span class="hold-on">차단 유지 해제</span></button>
 				<button id="agent-hangup" class="danger">끊기</button>
 			</div>
+			<p class="hint" id="agent-risk" hidden role="alert"><strong id="agent-risk-title"></strong> <span id="agent-risk-detail"></span></p>
+			<ol class="log captions-log" id="agent-transcript" aria-live="polite"></ol>
 			<p class="hint">위험 구간 차단은 아직 내 귀에 오지 않은 민원인 음성(지연 버퍼 안)을 한 번 지운다. 차단 유지는 켜 두는 동안 계속 지우고, 다시 누르면 해제한다. 실제로는 STT·위험 판단이 부른다.</p>
 		</div>
 		<ol class="log" id="agent-log"></ol>
@@ -101,6 +103,14 @@
 		<p id="status-queue" class="mono">비어 있음</p>
 		<h3>통화</h3>
 		<table><thead><tr><th>통화</th><th>상태</th><th>상담원</th><th>STT 전달</th><th>차단</th></tr></thead><tbody id="status-calls"></tbody></table>
+		<h3>STT 서버</h3>
+		<form class="row" id="stt-form">
+			<input id="stt-url" placeholder="Colab에 나온 https://… 주소" aria-label="STT 서버 주소">
+			<button type="submit" class="primary">적용</button>
+			<button type="button" id="stt-clear">끄기</button>
+		</form>
+		<p class="mono" id="stt-current">연결 안 함</p>
+		<p class="hint">STT 담당 서버(streaming-asr1)의 주소. 다음에 연결되는 통화부터 적용되고, 자막이 상담원 화면에 뜬다.</p>
 		<h3>STT로 보낸 음성 듣기</h3>
 		<div id="status-dumps" class="dumps"></div>
 	</section>

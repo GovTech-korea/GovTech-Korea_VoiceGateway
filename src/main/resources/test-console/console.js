@@ -484,6 +484,7 @@ function agentMessage(msg) {
 			$('agent-call').textContent = msg.callId;
 			$('agent-delay').textContent = HAS_CITIZEN ? `${msg.delayMs}ms` : `${msg.delayMs / 1000}초`;
 			agent.player.reset();
+			clearCaptions();
 			if (agent.stopTimer) agent.stopTimer();
 			agent.stopTimer = startCallTimer('agent-timer');
 			if ($('agent-mic').checked) startAgentMic();
@@ -491,6 +492,16 @@ function agentMessage(msg) {
 		case 'call-ended':
 			stopAgentCall();
 			agent.callId = null;
+			break;
+		case 'transcript':
+			showTranscript(msg);
+			break;
+		case 'risk-detected':
+			showRisk(msg);
+			break;
+		case 'mute-hold-changed':
+			setHold(msg.hold);
+			logTo(agent.log, 'sys', msg.hold ? 'STT가 차단 유지를 켰습니다' : 'STT가 차단 유지를 껐습니다');
 			break;
 	}
 	agentUi();
@@ -570,6 +581,60 @@ async function agentMute() {
 	} catch (e) {
 		logTo(agent.log, 'err', `차단 실패: ${e.message}`);
 	}
+}
+
+// ---------- 자막·위험 알림 (STT 서버가 연결돼 있을 때) ----------
+
+const RISK_LABELS = { ABUSE: '욕설·모욕', THREAT: '위협', SEXUAL: '성적 발언' };
+const captions = new Map(); // utteranceId → li
+
+function clearCaptions() {
+	captions.clear();
+	const list = $('agent-transcript');
+	if (list) list.replaceChildren();
+	const alert = $('agent-risk');
+	if (alert) alert.hidden = true;
+	setText('agent-stt-state', state.sttUrl ? '자막 대기 중' : 'STT 연결 안 됨');
+}
+
+function showTranscript(msg) {
+	const list = $('agent-transcript');
+	if (!list) return;
+	let line = captions.get(msg.utteranceId);
+	if (!line) {
+		line = document.createElement('li');
+		captions.set(msg.utteranceId, line);
+		list.appendChild(line);
+		while (list.children.length > 30) {
+			const first = list.firstElementChild;
+			for (const [key, value] of captions) if (value === first) captions.delete(key);
+			first.remove();
+		}
+	}
+	line.textContent = msg.text;
+	line.classList.toggle('partial', !msg.final);
+	list.scrollTop = list.scrollHeight;
+	setText('agent-stt-state', '자막 받는 중');
+}
+
+function showRisk(msg) {
+	const label = RISK_LABELS[msg.riskType] || msg.riskType || '위험 발언';
+	const line = captions.get(msg.utteranceId);
+	if (line) {
+		line.classList.add('risk');
+		line.dataset.label = label;
+	}
+	const now = performance.now();
+	timeline.mutes.push({ start: now, end: now });
+	const alert = $('agent-risk');
+	if (alert) {
+		alert.hidden = false;
+		setText('agent-risk-title', `${label} 감지`);
+		setText('agent-risk-detail', ` · 들리기 전에 ${msg.mutedFrames * 20}ms를 차단했어요`);
+		clearTimeout(showRisk.timer);
+		showRisk.timer = setTimeout(() => (alert.hidden = true), 6000);
+	}
+	logTo(agent.log, 'err', `위험 발언 감지(${label}, ${msg.severity}): "${msg.text}" → ${msg.mutedFrames}프레임 차단`);
 }
 
 /**
@@ -863,6 +928,9 @@ async function refreshStatus() {
 		$('server-dot').className = 'dot ok';
 		$('server-text').textContent = '게이트웨이 연결됨';
 		if (!state.delayMs) state.delayMs = s.delayMs;
+		state.sttUrl = s.sttUrl;
+		setText('stt-current', s.sttUrl ? `연결 주소: ${s.sttUrl}` : '연결 안 함 (자막 없음)');
+		if (!captions.size) setText('agent-stt-state', s.sttUrl ? '자막 대기 중' : 'STT 연결 안 됨');
 		setText('delay-ms', `${s.delayMs / 1000}초`);
 		const waiting = s.queue.length;
 		setText('agent-queue-count', waiting ? `기다리는 민원인 ${waiting}명` : '기다리는 민원인 없음');
@@ -934,6 +1002,34 @@ async function refreshRecordings(enabled) {
 
 if (HAS_AGENT) agentUi();
 if (HAS_CITIZEN) citizenUi();
+// ---------- STT 서버 주소 (통합 콘솔) ----------
+
+async function saveSttUrl(url) {
+	try {
+		const res = await fetch('/api/v1/stt/endpoint', {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ url }),
+		});
+		const body = await res.json().catch(() => ({}));
+		if (!res.ok) throw new Error(body.message || `HTTP ${res.status}`);
+		setText('stt-current', body.url ? `연결 주소: ${body.url} (다음 통화부터)` : '연결 안 함 (자막 없음)');
+	} catch (e) {
+		setText('stt-current', `주소를 적용하지 못했습니다: ${e.message}`);
+	}
+}
+
+if ($('stt-form')) {
+	$('stt-form').addEventListener('submit', (e) => {
+		e.preventDefault();
+		saveSttUrl($('stt-url').value.trim());
+	});
+	$('stt-clear').onclick = () => {
+		$('stt-url').value = '';
+		saveSttUrl('');
+	};
+}
+
 // 앱 화면 상단 상태바 시각
 (function statusBarClock() {
 	const now = new Date();
