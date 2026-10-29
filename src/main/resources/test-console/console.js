@@ -1063,7 +1063,6 @@ function renderStt(url) {
 	if (!$('stt-panel')) return;
 	const note = (text) => { if (Date.now() >= sttNoteUntil) setText('stt-note', text); };
 	if (!url) {
-		setBadge($('stt-badge'), '꺼짐', 'warn');
 		['stt-host', 'stt-path', 'stt-lang'].forEach((id) => setText(id, '-'));
 		setText('stt-current', '설정 안 됨');
 		note('STT로 보내지 않는다. 상담원 화면에 자막이 뜨지 않고 위험 자동 차단도 동작하지 않는다.');
@@ -1077,7 +1076,6 @@ function renderStt(url) {
 		return;
 	}
 	const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
-	setBadge($('stt-badge'), '설정됨', 'ok');
 	setText('stt-host', u.host);
 	setText('stt-path', u.pathname);
 	setText('stt-lang', u.searchParams.get('language') || '-');
@@ -1097,12 +1095,44 @@ async function saveSttUrl(url) {
 		const body = await res.json().catch(() => ({}));
 		if (!res.ok) throw new Error(body.message || `HTTP ${res.status}`);
 		renderStt(body.url);
+		checkSttHealth();
 		sttNoteUntil = Date.now() + 8000;
 		setText('stt-note', body.url ? '적용했습니다. 다음에 연결되는 통화부터 이 주소로 보냅니다.' : 'STT 전송을 껐습니다.');
 	} catch (e) {
 		sttNoteUntil = Date.now() + 8000;
 		setText('stt-note', `주소를 적용하지 못했습니다: ${e.message}`);
 	}
+}
+
+/** 게이트웨이가 STT 서버의 /health를 불러 본 결과 (실제로 응답하는지) */
+async function checkSttHealth() {
+	try {
+		const res = await fetch('/api/v1/stt/endpoint/health');
+		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		const h = await res.json();
+		const el = $('stt-health');
+		if (!h.configured) {
+			setBadge($('stt-badge'), '꺼짐', 'warn');
+			el.textContent = '주소 없음';
+			el.className = '';
+		} else if (h.reachable) {
+			setBadge($('stt-badge'), '연결됨', 'ok');
+			el.textContent = `응답함 · ${h.latencyMs}ms${h.device ? ` · ${h.device}` : ''}`;
+			el.className = 'ok';
+		} else {
+			setBadge($('stt-badge'), '응답 없음', 'bad');
+			el.textContent = `응답 없음 · ${h.error}`;
+			el.className = 'bad';
+		}
+		setText('stt-model', h.model || '-');
+	} catch {
+		setBadge($('stt-badge'), '확인 실패', 'bad');
+	}
+}
+
+if ($('stt-panel')) {
+	checkSttHealth();
+	setInterval(checkSttHealth, 5000);
 }
 
 if ($('stt-form')) {

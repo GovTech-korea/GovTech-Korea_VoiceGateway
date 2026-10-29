@@ -169,6 +169,7 @@ kill $(cat runtime/logs/server.pid runtime/logs/tunnel.pid)                     
 | `PUT /api/v1/calls/{callId}/mute-hold` | 차단 유지 켜기/끄기. 본문 `{"hold": true}`면 아직 나가지 않은 음성과 이후 들어오는 음성을 계속 무음 처리, `{"hold": false}`면 해제 (STT에는 원본 그대로) |
 | `GET /api/v1/status` | 설정, 상담원·대기열·통화·STT 전달 현황 |
 | `GET` / `PUT /api/v1/stt/endpoint` | STT 서버 주소 확인·변경. 본문 `{"url": "https://…"}` (비우면 끔) |
+| `GET /api/v1/stt/endpoint/health` | 지금 주소의 STT 서버가 응답하는지 (`/health`, 2초 제한). `reachable`·`latencyMs`·`model`·`device`·`error` |
 | `GET /api/v1/stt/recordings` | STT 기록 목록 (`dump-dir` 지정 시) |
 | `GET /api/v1/stt/recordings/{name}` | STT 기록을 WAV로 받기 |
 

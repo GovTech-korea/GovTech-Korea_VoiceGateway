@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.govtech.voicegateway.domain.stt.SttEndpoint;
+import com.govtech.voicegateway.domain.stt.SttHealth;
+import com.govtech.voicegateway.domain.stt.SttHealthChecker;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -25,10 +27,17 @@ import lombok.RequiredArgsConstructor;
 public class SttEndpointController {
 
 	private final SttEndpoint endpoint;
+	private final SttHealthChecker healthChecker;
 
 	@GetMapping
 	public SttEndpointResponse get() {
 		return SttEndpointResponse.of(endpoint.current());
+	}
+
+	/** 지금 주소의 STT 서버가 응답하는지 ({@code /health}, 2초 제한) */
+	@GetMapping("/health")
+	public SttHealth health() {
+		return healthChecker.check();
 	}
 
 	/** 본문 {@code {"url": "https://xxxx.ngrok-free.app"}}. url을 비우면 STT 서버로 보내지 않는다 */
