@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>MOMIN 통화 테스트</title>
+<meta name="theme-color" content="#0B1F4E">
+<link rel="icon" type="image/png" href="img/favicon.png">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -19,23 +21,40 @@
 		<symbol id="i-coffee" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8zM6 1v3M10 1v3M14 1v3"/></symbol>
 		<symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
 		<symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+		<symbol id="i-taegeuk" viewBox="0 0 24 24"><path d="M2 12a10 10 0 0 1 20 0a5 5 0 0 1-10 0a5 5 0 0 0-10 0z" fill="#F51E2B"/><path d="M2 12a5 5 0 0 0 10 0a5 5 0 0 1 10 0a10 10 0 0 1-20 0z" fill="#0B1F4E"/></symbol>
 	</defs>
 </svg>
 <main class="landing">
 	<header class="landing-top">
-		<span class="landing-brand"><span><svg width="18" height="18"><use href="#i-shield"/></svg></span>MOMIN</span>
+		<img class="wordmark" src="img/wordmark.png" alt="MOMIN">
 		<span class="landing-conn"><span class="dot" id="server-dot"></span><span id="server-text">확인 중</span></span>
 	</header>
 
-	<h1>상담원을 지키는 통화,<br>직접 걸어 보세요</h1>
-	<p class="lead">민원인의 목소리는 상담원에게 <strong><span id="delay-ms">0.8초</span> 늦게</strong> 도착합니다. 그 사이 위험한 말은 상담원이 듣기 전에 지울 수 있어요.</p>
+	<section class="hero">
+		<div class="hero-text">
+			<p class="eyebrow"><svg width="16" height="16"><use href="#i-taegeuk"/></svg>모두의 민원 · AI 민원 보호 서비스</p>
+			<h1>상담사를 지키고,<br>국민의 시간을 지킨다.</h1>
+			<p class="lead">민원인의 목소리는 상담사에게 <strong><span id="delay-ms">0.8초</span> 늦게</strong> 도착합니다. 그 사이 AI가 위험한 말을 찾아, 상담사가 듣기 전에 지웁니다.</p>
+			<ul class="values">
+				<li><b>보호</b>Protection</li>
+				<li><b>공정</b>Fairness</li>
+				<li><b>효율</b>Efficiency</li>
+			</ul>
+		</div>
+		<div class="hero-art" aria-hidden="true">
+			<img class="cloud cloud-a" src="img/cloud.svg" alt="">
+			<img class="cloud cloud-b" src="img/cloud.svg" alt="">
+			<img class="haetae" src="img/haetae.png" alt="">
+			<p class="haetae-name">공공 서비스를 지키는 수호자, 해태</p>
+		</div>
+	</section>
 
 	<div class="roles">
 		<a class="role role-agent" href="agent.html">
-			<span class="role-icon"><svg width="28" height="28"><use href="#i-headset"/></svg></span>
+			<img class="role-app-icon" src="img/app-icon.png" alt="">
 			<small>상담원 앱</small>
 			<h2>전화를 받는 사람</h2>
-			<p>대기하다가 전화가 오면 받고, 위험한 말을 차단합니다.</p>
+			<p>대기하다가 전화가 오면 받습니다. 위험한 말은 해태가 먼저 막아요.</p>
 			<span class="go">상담원 앱 열기 <svg width="18" height="18"><use href="#i-arrow"/></svg></span>
 		</a>
 		<a class="role role-citizen" href="citizen.html">
@@ -51,7 +70,7 @@
 		<li>상담원이 먼저 접속</li>
 		<li>민원인이 전화 걸기</li>
 		<li>상담원이 받기</li>
-		<li>통화 중 위험 구간 차단</li>
+		<li>위험한 말은 자동 차단</li>
 	</ol>
 
 	<p class="landing-foot">두 사람이 각자 휴대폰이나 PC로 들어오면 됩니다 · Chrome 권장, 마이크 권한 허용<br>혼자 두 역할을 시험하려면 <a href="console.html">통합 콘솔</a></p>
