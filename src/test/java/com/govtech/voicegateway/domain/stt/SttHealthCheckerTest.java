@@ -7,11 +7,14 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.concurrent.Executors;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
 import tools.jackson.databind.json.JsonMapper;
@@ -19,29 +22,40 @@ import tools.jackson.databind.json.JsonMapper;
 class SttHealthCheckerTest {
 
 	private HttpServer server;
+	private SttHealthChecker checker;
 
 	@AfterEach
 	void stop() {
+		if (checker != null) {
+			checker.close();
+		}
 		if (server != null) {
 			server.stop(0);
 		}
 	}
 
 	private SttHealthChecker checker(String url) {
-		return new SttHealthChecker(new SttEndpoint(new SttProperties(SttAudioFormat.PCM16_16K, null, url == null ? null : URI.create(url))),
+		checker = new SttHealthChecker(
+				new SttEndpoint(new SttProperties(SttAudioFormat.PCM16_16K, null, url == null ? null : URI.create(url))),
 				JsonMapper.builder().build());
+		return checker;
+	}
+
+	private int serve(HttpHandler handler) throws IOException {
+		server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+		server.setExecutor(Executors.newCachedThreadPool());
+		server.createContext("/health", handler);
+		server.start();
+		return server.getAddress().getPort();
 	}
 
 	private int serve(int status, String body) throws IOException {
-		server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-		server.createContext("/health", exchange -> {
+		return serve(exchange -> {
 			byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
 			exchange.sendResponseHeaders(status, bytes.length);
 			exchange.getResponseBody().write(bytes);
 			exchange.close();
 		});
-		server.start();
-		return server.getAddress().getPort();
 	}
 
 	@Test
@@ -80,6 +94,59 @@ class SttHealthCheckerTest {
 
 		assertThat(health.reachable()).isTrue();
 		assertThat(health.model()).isNull();
+	}
+
+	@Test
+	@DisplayName("헤더를 늦게 보내면 2초 남짓에 끊고 응답 없음")
+	void slowHeaders() throws IOException {
+		int port = serve(exchange -> {
+			sleep(4000);
+			exchange.close();
+		});
+
+		long start = System.nanoTime();
+		SttHealth health = checker("http://127.0.0.1:" + port).check();
+
+		assertThat(health.reachable()).isFalse();
+		assertThat(health.error()).isEqualTo("2초 안에 응답 없음");
+		assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofMillis(3500));
+	}
+
+	@Test
+	@DisplayName("헤더만 보내고 본문을 끝내지 않아도 2초 남짓에 끊는다")
+	void slowBody() throws IOException {
+		int port = serve(exchange -> {
+			exchange.sendResponseHeaders(200, 0); // 길이 없이(청크) 보내기 시작
+			exchange.getResponseBody().write("{\"model\":".getBytes(StandardCharsets.UTF_8));
+			exchange.getResponseBody().flush();
+			sleep(4000);
+			exchange.close();
+		});
+
+		long start = System.nanoTime();
+		SttHealth health = checker("http://127.0.0.1:" + port).check();
+
+		assertThat(health.reachable()).isFalse();
+		assertThat(health.error()).isEqualTo("2초 안에 응답 없음");
+		assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofMillis(3500));
+	}
+
+	@Test
+	@DisplayName("본문이 아무리 커도 64KB까지만 읽고 응답한 것으로 본다")
+	void largeBody() throws IOException {
+		int port = serve(200, "x".repeat(1024 * 1024));
+
+		SttHealth health = checker("http://127.0.0.1:" + port).check();
+
+		assertThat(health.reachable()).isTrue();
+	}
+
+	private static void sleep(long ms) {
+		try {
+			Thread.sleep(ms);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
 	}
 
 	@Test

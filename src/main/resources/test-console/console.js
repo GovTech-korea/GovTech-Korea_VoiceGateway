@@ -1104,13 +1104,18 @@ async function saveSttUrl(url) {
 	}
 }
 
+/** 마지막으로 보낸 상태 확인 번호. 늦게 도착한 이전 확인(이전 주소)의 결과는 버린다 */
+let sttHealthSeq = 0;
+
 /** 게이트웨이가 STT 서버의 /health를 불러 본 결과 (실제로 응답하는지) */
 async function checkSttHealth() {
+	const seq = ++sttHealthSeq;
+	const el = $('stt-health');
 	try {
 		const res = await fetch('/api/v1/stt/endpoint/health');
 		if (!res.ok) throw new Error(`HTTP ${res.status}`);
 		const h = await res.json();
-		const el = $('stt-health');
+		if (seq !== sttHealthSeq) return;
 		if (!h.configured) {
 			setBadge($('stt-badge'), '꺼짐', 'warn');
 			el.textContent = '주소 없음';
@@ -1125,8 +1130,12 @@ async function checkSttHealth() {
 			el.className = 'bad';
 		}
 		setText('stt-model', h.model || '-');
-	} catch {
+	} catch (e) {
+		if (seq !== sttHealthSeq) return;
 		setBadge($('stt-badge'), '확인 실패', 'bad');
+		el.textContent = `게이트웨이에 물어보지 못함 · ${e.message}`;
+		el.className = 'bad';
+		setText('stt-model', '-');
 	}
 }
 
