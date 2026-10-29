@@ -1041,13 +1041,36 @@ async function refreshRecordings(enabled) {
 		const meta = document.createElement('span');
 		meta.dataset.name = r.name;
 		meta.textContent = describe(r);
-		title.append(Object.assign(document.createElement('strong'), { textContent: r.callId }), meta);
+		const remove = Object.assign(document.createElement('button'), {
+			type: 'button',
+			className: 'dump-delete',
+			textContent: '삭제',
+			title: '이 녹음 파일을 지웁니다',
+		});
+		remove.onclick = () => deleteRecording(r, remove);
+		title.append(Object.assign(document.createElement('strong'), { textContent: r.callId }), meta, remove);
 		const audio = document.createElement('audio');
 		audio.controls = true;
 		audio.preload = 'none';
 		audio.src = `/api/v1/stt/recordings/${encodeURIComponent(r.name)}`;
 		item.append(title, audio);
 		box.appendChild(item);
+	}
+}
+
+/** 녹음 하나를 지운다. 통화 중이라 아직 쓰고 있으면 게이트웨이가 409로 거절한다 */
+async function deleteRecording(r, button) {
+	if (!confirm(`${r.callId} 녹음을 지울까요? 되돌릴 수 없습니다.`)) return;
+	button.disabled = true;
+	try {
+		const res = await fetch(`/api/v1/stt/recordings/${encodeURIComponent(r.name)}`, { method: 'DELETE' });
+		if (res.status === 409) throw new Error('통화가 끝난 뒤 지울 수 있습니다');
+		if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`);
+		recordingsKey = ''; // 목록을 바로 다시 그린다
+		await refreshRecordings(true);
+	} catch (e) {
+		button.disabled = false;
+		alert(`지우지 못했습니다: ${e.message}`);
 	}
 }
 
