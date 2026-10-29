@@ -485,3 +485,31 @@ body {
 /* 해태가 원 위로 살짝 튀어나오고 아래 글자는 가리지 않게 */
 .avatar, .idle-icon { margin-top: 28px; margin-bottom: 22px; }
 .avatar img, .idle-icon img { width: 108%; margin-top: -26%; }
+
+/* ---------- 시작 화면: 제목과 해태를 가운데로 모은다 ---------- */
+
+.hero { grid-template-columns: auto auto; justify-content: center; gap: clamp(28px, 7vw, 88px); margin: 8px 0 40px; }
+.hero h1 { font-size: clamp(64px, 11vw, 120px); letter-spacing: -0.04em; line-height: 1; }
+.hero .eyebrow { margin-bottom: 10px; }
+.hero-art { width: clamp(220px, 30vw, 320px); }
+.haetae { width: 100%; }
+.cloud-a { left: -22%; width: 110px; }
+.cloud-b { right: -18%; width: 90px; }
+@media (max-width: 760px) { .hero { grid-template-columns: 1fr; justify-items: center; gap: 16px; } .hero-art { width: 220px; } }
+
+.landing-actions { display: flex; align-items: center; gap: 14px; }
+.console-pill { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px; background: var(--navy); color: #fff; font-size: 14px; font-weight: 700; text-decoration: none; }
+.console-pill:hover { background: var(--brand-red); }
+@media (prefers-color-scheme: dark) { .console-pill { background: #fff; color: var(--navy); } }
+@media (max-width: 520px) { .landing-conn #server-text { display: none; } }
+
+.console-card { display: flex; align-items: center; gap: 18px; margin-top: 20px; padding: 22px 28px; border-radius: 24px; text-decoration: none; color: var(--page-text); background: #fff; border: 1px dashed #B9C4DE; transition: transform 120ms, border-color 120ms; }
+.console-card:hover { transform: translateY(-3px); border-color: var(--brand-red); }
+.console-card-icon { flex: none; width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; background: var(--cloud); color: var(--navy); }
+.console-card-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.console-card small { font-size: 12px; font-weight: 700; color: var(--brand-red); }
+.console-card strong { font-size: 20px; letter-spacing: -0.02em; }
+.console-card-text span { font-size: 14px; color: var(--page-text-2); }
+.console-card .go { margin-left: auto; flex: none; display: flex; align-items: center; gap: 6px; font-weight: 700; color: var(--brand-red); }
+@media (prefers-color-scheme: dark) { .console-card { background: #0E1C44; border-color: #2A4185; } .console-card-icon { background: #1A2E66; color: #fff; } }
+@media (max-width: 600px) { .console-card { flex-wrap: wrap; padding: 20px; } .console-card .go { margin-left: 0; } }

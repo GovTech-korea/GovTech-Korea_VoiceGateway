@@ -21,13 +21,17 @@
 		<symbol id="i-coffee" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8zM6 1v3M10 1v3M14 1v3"/></symbol>
 		<symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
 		<symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+		<symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4M12 3v14"/></symbol>
 		<symbol id="i-taegeuk" viewBox="0 0 24 24"><path d="M2 12a10 10 0 0 1 20 0a5 5 0 0 1-10 0a5 5 0 0 0-10 0z" fill="#F51E2B"/><path d="M2 12a5 5 0 0 0 10 0a5 5 0 0 1 10 0a10 10 0 0 1-20 0z" fill="#0B1F4E"/></symbol>
 	</defs>
 </svg>
 <main class="landing">
 	<header class="landing-top">
 		<img class="wordmark" src="img/wordmark.png" alt="MOMIN">
-		<span class="landing-conn"><span class="dot" id="server-dot"></span><span id="server-text">확인 중</span></span>
+		<div class="landing-actions">
+			<span class="landing-conn"><span class="dot" id="server-dot"></span><span id="server-text">확인 중</span></span>
+			<a class="console-pill" href="console.html"><svg width="16" height="16"><use href="#i-grid"/></svg>통합 콘솔</a>
+		</div>
 	</header>
 
 	<section class="hero">
@@ -60,6 +64,16 @@
 		</a>
 	</div>
 
+	<a class="console-card" href="console.html">
+		<span class="console-card-icon"><svg width="26" height="26"><use href="#i-grid"/></svg></span>
+		<span class="console-card-text">
+			<small>개발·시연용</small>
+			<strong>통합 콘솔</strong>
+			<span>상담원·민원인을 한 화면에 띄우고 게이트웨이 상태, STT 서버, 녹음을 확인합니다</span>
+		</span>
+		<span class="go">열기 <svg width="18" height="18"><use href="#i-arrow"/></svg></span>
+	</a>
+
 	<ol class="flow">
 		<li>상담원이 먼저 접속</li>
 		<li>민원인이 전화 걸기</li>
@@ -67,7 +81,7 @@
 		<li>위험한 말은 자동 차단</li>
 	</ol>
 
-	<p class="landing-foot">두 사람이 각자 휴대폰이나 PC로 들어오면 됩니다 · Chrome 권장, 마이크 권한 허용<br>혼자 두 역할을 시험하려면 <a href="console.html">통합 콘솔</a></p>
+	<p class="landing-foot">두 사람이 각자 휴대폰이나 PC로 들어오면 됩니다 · Chrome 권장, 마이크 권한 허용</p>
 </main>
 <script>
 // 시작 화면은 연결 상태와 지연 시간만 보여 준다

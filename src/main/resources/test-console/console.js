@@ -972,7 +972,7 @@ async function refreshStatus() {
 		$('server-text').textContent = '게이트웨이 연결됨';
 		if (!state.delayMs) state.delayMs = s.delayMs;
 		state.sttUrl = s.sttUrl;
-		setText('stt-current', s.sttUrl ? `연결 주소: ${s.sttUrl}` : '연결 안 함 (자막 없음)');
+		renderStt(s.sttUrl);
 		if (!captions.size) setText('agent-stt-state', s.sttUrl ? '자막 대기 중' : 'STT 연결 안 됨');
 		setText('delay-ms', `${s.delayMs / 1000}초`);
 		const waiting = s.queue.length;
@@ -1016,11 +1016,14 @@ async function refreshRecordings(enabled) {
 	const list = await res.json();
 	// 재생기는 이름이 바뀔 때만 다시 만든다 (진행 중인 통화의 크기가 늘 때마다 만들면 듣던 재생이 끊김). 설명 줄은 매번 갱신
 	const key = list.map((r) => r.name).join('|');
-	const describe = (r) => `${r.callId} · ${(r.durationMs / 1000).toFixed(1)}초 · ${clock(new Date(r.startedAtEpochMs))}`;
+	const describe = (r) => {
+		const d = new Date(r.startedAtEpochMs);
+		return `${d.getMonth() + 1}/${d.getDate()} ${clock(d)} · ${(r.durationMs / 1000).toFixed(1)}초`;
+	};
 	if (key === recordingsKey) {
-		box.querySelectorAll('[data-name]').forEach((title) => {
-			const r = list.find((x) => x.name === title.dataset.name);
-			if (r) title.textContent = describe(r);
+		box.querySelectorAll('[data-name]').forEach((meta) => {
+			const r = list.find((x) => x.name === meta.dataset.name);
+			if (r) meta.textContent = describe(r);
 		});
 		return;
 	}
@@ -1030,22 +1033,59 @@ async function refreshRecordings(enabled) {
 		box.appendChild(Object.assign(document.createElement('p'), { className: 'hint', textContent: '아직 기록 없음' }));
 		return;
 	}
-	for (const r of list.slice(0, 5)) {
+	for (const r of list.slice(0, 10)) {
+		const item = document.createElement('div');
+		item.className = 'dump';
 		const title = document.createElement('div');
-		title.className = 'mono';
-		title.dataset.name = r.name;
-		title.textContent = describe(r);
+		title.className = 'dump-title';
+		const meta = document.createElement('span');
+		meta.dataset.name = r.name;
+		meta.textContent = describe(r);
+		title.append(Object.assign(document.createElement('strong'), { textContent: r.callId }), meta);
 		const audio = document.createElement('audio');
 		audio.controls = true;
 		audio.preload = 'none';
 		audio.src = `/api/v1/stt/recordings/${encodeURIComponent(r.name)}`;
-		box.append(title, audio);
+		item.append(title, audio);
+		box.appendChild(item);
 	}
 }
 
 if (HAS_AGENT) agentUi();
 if (HAS_CITIZEN) citizenUi();
 // ---------- STT 서버 주소 (통합 콘솔) ----------
+
+/** 주소를 적용한 결과 메시지를 이 시각까지 남긴다 (1초마다 도는 상태 갱신이 덮어쓰지 않게) */
+let sttNoteUntil = 0;
+
+/** 게이트웨이에 설정된 STT 주소를 서버·경로·언어로 나눠 보여 준다 */
+function renderStt(url) {
+	if (!$('stt-panel')) return;
+	const note = (text) => { if (Date.now() >= sttNoteUntil) setText('stt-note', text); };
+	if (!url) {
+		setBadge($('stt-badge'), '꺼짐', 'warn');
+		['stt-host', 'stt-path', 'stt-lang'].forEach((id) => setText(id, '-'));
+		setText('stt-current', '설정 안 됨');
+		note('STT로 보내지 않는다. 상담원 화면에 자막이 뜨지 않고 위험 자동 차단도 동작하지 않는다.');
+		return;
+	}
+	let u;
+	try {
+		u = new URL(url);
+	} catch {
+		setText('stt-current', url); // 서버가 정리해 주므로 오지 않지만, 와도 상태 갱신 전체를 멈추지 않는다
+		return;
+	}
+	const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+	setBadge($('stt-badge'), '설정됨', 'ok');
+	setText('stt-host', u.host);
+	setText('stt-path', u.pathname);
+	setText('stt-lang', u.searchParams.get('language') || '-');
+	setText('stt-current', url);
+	note(local
+		? '게이트웨이와 같은 컴퓨터에서 돌고 있는 STT 서버(streaming-asr1)로 보낸다.'
+		: '외부 STT 서버(Colab 등)로 보낸다. Colab을 다시 켜면 주소가 바뀌니 여기서 새 주소를 적용한다.');
+}
 
 async function saveSttUrl(url) {
 	try {
@@ -1056,9 +1096,12 @@ async function saveSttUrl(url) {
 		});
 		const body = await res.json().catch(() => ({}));
 		if (!res.ok) throw new Error(body.message || `HTTP ${res.status}`);
-		setText('stt-current', body.url ? `연결 주소: ${body.url} (다음 통화부터)` : '연결 안 함 (자막 없음)');
+		renderStt(body.url);
+		sttNoteUntil = Date.now() + 8000;
+		setText('stt-note', body.url ? '적용했습니다. 다음에 연결되는 통화부터 이 주소로 보냅니다.' : 'STT 전송을 껐습니다.');
 	} catch (e) {
-		setText('stt-current', `주소를 적용하지 못했습니다: ${e.message}`);
+		sttNoteUntil = Date.now() + 8000;
+		setText('stt-note', `주소를 적용하지 못했습니다: ${e.message}`);
 	}
 }
 
