@@ -1,6 +1,7 @@
 package com.govtech.voicegateway.domain.stt.api;
 
 import static org.mockito.BDDMockito.given;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -62,5 +63,17 @@ class SttRecordingControllerTest {
 
 		mockMvc.perform(get("/api/v1/stt/recordings/nope.pcm"))
 				.andExpect(status().isNotFound());
+	}
+
+	@Test
+	@DisplayName("지우면 204, 없으면 404, 아직 쓰고 있으면 409")
+	void deleteRecording() throws Exception {
+		given(recordings.delete("call-1-1000.pcm")).willReturn(SttRecordings.Deletion.DELETED);
+		given(recordings.delete("call-2-1000.pcm")).willReturn(SttRecordings.Deletion.NOT_FOUND);
+		given(recordings.delete("call-3-1000.pcm")).willReturn(SttRecordings.Deletion.IN_USE);
+
+		mockMvc.perform(delete("/api/v1/stt/recordings/call-1-1000.pcm")).andExpect(status().isNoContent());
+		mockMvc.perform(delete("/api/v1/stt/recordings/call-2-1000.pcm")).andExpect(status().isNotFound());
+		mockMvc.perform(delete("/api/v1/stt/recordings/call-3-1000.pcm")).andExpect(status().isConflict());
 	}
 }

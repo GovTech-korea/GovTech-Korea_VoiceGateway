@@ -5,6 +5,8 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -36,6 +38,13 @@ public class RecordingSttGateway implements SttGateway {
 	static final int MAX_PENDING = 250;
 
 	private final SttProperties properties;
+	/** 아직 쓰고 있는 기록 파일 이름 (통화 중). 이 파일은 지우지 않는다 */
+	private final Set<String> writing = ConcurrentHashMap.newKeySet();
+
+	/** 통화가 끝나지 않아 아직 쓰고 있는 기록인지 */
+	public boolean isWriting(String fileName) {
+		return writing.contains(fileName);
+	}
 
 	@Override
 	public SttStream open(String callId, SttAudioFormat format, SttListener listener) {
@@ -43,10 +52,13 @@ public class RecordingSttGateway implements SttGateway {
 		Path file = properties.dumpDir() == null ? null
 				: properties.dumpDir().toAbsolutePath().resolve(callId + "-" + System.currentTimeMillis() + ".pcm");
 		log.info("STT 스트림 시작: {} ({}{})", callId, format, file == null ? "" : ", 기록 " + file);
+		if (file != null) {
+			writing.add(file.getFileName().toString());
+		}
 		return new RecordingStream(callId, format, file);
 	}
 
-	private static final class RecordingStream implements SttStream {
+	private final class RecordingStream implements SttStream {
 
 		private final String callId;
 		private final SttAudioFormat format;
@@ -125,6 +137,7 @@ public class RecordingSttGateway implements SttGateway {
 					log.warn("STT 기록 파일 닫기 실패: {} {}", file, e.getMessage());
 				}
 			}
+			writing.remove(file.getFileName().toString());
 		}
 	}
 }

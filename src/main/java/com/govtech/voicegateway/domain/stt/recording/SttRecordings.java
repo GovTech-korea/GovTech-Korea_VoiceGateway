@@ -34,6 +34,12 @@ public class SttRecordings {
 	private static final Pattern NAME = Pattern.compile("([A-Za-z0-9_-]{1,64})-(\\d{1,18})\\.pcm");
 
 	private final SttProperties properties;
+	private final RecordingSttGateway gateway;
+
+	/** 삭제 결과 */
+	public enum Deletion {
+		DELETED, NOT_FOUND, IN_USE
+	}
 
 	public boolean enabled() {
 		return properties.dumpDir() != null;
@@ -64,6 +70,28 @@ public class SttRecordings {
 			return Optional.empty();
 		}
 		return findFile(name).map(this::open);
+	}
+
+	/**
+	 * 기록 하나를 지운다. 통화 중이라 아직 쓰고 있는 기록은 지우지 않는다.
+	 * 이름은 {@link #openWav}와 같은 규칙으로 검사하고, 실제 폴더 목록에서 고른 파일만 지운다.
+	 */
+	public Deletion delete(String name) {
+		if (!enabled() || !NAME.matcher(name).matches()) {
+			return Deletion.NOT_FOUND;
+		}
+		if (gateway.isWriting(name)) {
+			return Deletion.IN_USE;
+		}
+		Optional<Path> file = findFile(name);
+		if (file.isEmpty()) {
+			return Deletion.NOT_FOUND;
+		}
+		try {
+			return Files.deleteIfExists(file.get()) ? Deletion.DELETED : Deletion.NOT_FOUND;
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
 	}
 
 	/**

@@ -11,8 +11,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import com.govtech.voicegateway.domain.call.Role;
 import com.govtech.voicegateway.domain.stt.SttAudioFormat;
+import com.govtech.voicegateway.domain.stt.SttChunk;
+import com.govtech.voicegateway.domain.stt.SttListener;
 import com.govtech.voicegateway.domain.stt.SttProperties;
+import com.govtech.voicegateway.domain.stt.SttStream;
 
 class SttRecordingsTest {
 
@@ -20,7 +24,8 @@ class SttRecordingsTest {
 	Path dir;
 
 	private SttRecordings recordings(SttAudioFormat format) {
-		return new SttRecordings(new SttProperties(format, dir, null));
+		SttProperties properties = new SttProperties(format, dir, null);
+		return new SttRecordings(properties, new RecordingSttGateway(properties));
 	}
 
 	@Test
@@ -82,10 +87,62 @@ class SttRecordingsTest {
 	@Test
 	@DisplayName("dump-dir을 설정하지 않으면 비어 있다")
 	void disabled() {
-		SttRecordings recordings = new SttRecordings(new SttProperties(SttAudioFormat.PCM16_16K, null, null));
+		SttProperties properties = new SttProperties(SttAudioFormat.PCM16_16K, null, null);
+		SttRecordings recordings = new SttRecordings(properties, new RecordingSttGateway(properties));
 
 		assertThat(recordings.enabled()).isFalse();
 		assertThat(recordings.list()).isEmpty();
 		assertThat(recordings.openWav("call-1-1000.pcm")).isEmpty();
+		assertThat(recordings.delete("call-1-1000.pcm")).isEqualTo(SttRecordings.Deletion.NOT_FOUND);
+	}
+
+	@Test
+	@DisplayName("기록을 지우면 파일과 목록에서 사라지고, 형식이 틀린 이름·없는 파일·폴더는 지우지 않는다")
+	void deleteRecording() throws Exception {
+		Files.write(dir.resolve("call-1-1000.pcm"), new byte[4]);
+		Files.write(dir.resolve("notes.txt"), new byte[4]);
+		Files.createDirectory(dir.resolve("call-2-1000.pcm"));
+		SttRecordings recordings = recordings(SttAudioFormat.PCM16_16K);
+
+		assertThat(recordings.delete("call-1-1000.pcm")).isEqualTo(SttRecordings.Deletion.DELETED);
+		assertThat(dir.resolve("call-1-1000.pcm")).doesNotExist();
+		assertThat(recordings.list()).isEmpty();
+
+		assertThat(recordings.delete("call-1-1000.pcm")).isEqualTo(SttRecordings.Deletion.NOT_FOUND);
+		assertThat(recordings.delete("notes.txt")).isEqualTo(SttRecordings.Deletion.NOT_FOUND);
+		assertThat(recordings.delete("../notes.txt")).isEqualTo(SttRecordings.Deletion.NOT_FOUND);
+		assertThat(recordings.delete("call-2-1000.pcm")).as("폴더").isEqualTo(SttRecordings.Deletion.NOT_FOUND);
+		assertThat(dir.resolve("notes.txt")).exists();
+		assertThat(dir.resolve("call-2-1000.pcm")).isDirectory();
+	}
+
+	@Test
+	@DisplayName("통화 중이라 아직 쓰고 있는 기록은 지우지 않고, 통화가 끝나면 지울 수 있다")
+	void deleteWhileWriting() throws Exception {
+		SttProperties properties = new SttProperties(SttAudioFormat.PCM16_16K, dir, null);
+		RecordingSttGateway gateway = new RecordingSttGateway(properties);
+		SttRecordings recordings = new SttRecordings(properties, gateway);
+		SttStream stream = gateway.open("call-1", SttAudioFormat.PCM16_16K, SttListener.NONE);
+		stream.send(new SttChunk("call-1", Role.CITIZEN, 0, 1_000, SttAudioFormat.PCM16_16K, new byte[320]));
+		String name = await(recordings).name();
+
+		assertThat(recordings.delete(name)).isEqualTo(SttRecordings.Deletion.IN_USE);
+		assertThat(dir.resolve(name)).exists();
+
+		stream.close();
+		long deadline = System.currentTimeMillis() + 2000;
+		while (gateway.isWriting(name) && System.currentTimeMillis() < deadline) {
+			Thread.sleep(10);
+		}
+		assertThat(recordings.delete(name)).isEqualTo(SttRecordings.Deletion.DELETED);
+	}
+
+	/** 기록 파일이 생길 때까지 기다린다 (파일 쓰기는 다른 스레드) */
+	private static SttRecording await(SttRecordings recordings) throws InterruptedException {
+		long deadline = System.currentTimeMillis() + 2000;
+		while (recordings.list().isEmpty() && System.currentTimeMillis() < deadline) {
+			Thread.sleep(10);
+		}
+		return recordings.list().getFirst();
 	}
 }

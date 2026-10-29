@@ -172,6 +172,7 @@ kill $(cat runtime/logs/server.pid runtime/logs/tunnel.pid)                     
 | `GET /api/v1/stt/endpoint/health` | 지금 주소의 STT 서버가 응답하는지 (`/health`, 2초 제한). `reachable`·`latencyMs`·`model`·`device`·`error` |
 | `GET /api/v1/stt/recordings` | STT 기록 목록 (`dump-dir` 지정 시) |
 | `GET /api/v1/stt/recordings/{name}` | STT 기록을 WAV로 받기 |
+| `DELETE /api/v1/stt/recordings/{name}` | STT 기록 지우기. 204, 없으면 404, 통화 중이라 아직 쓰고 있으면 409 |
 
 > 아직 인증이 없습니다. 내부망에서만 띄우세요.
 
