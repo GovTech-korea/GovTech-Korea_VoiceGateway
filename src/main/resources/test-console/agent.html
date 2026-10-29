@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0f1729">
+<meta name="theme-color" content="#0B1F4E">
 <title>상담원 앱 · MOMIN</title>
+<link rel="icon" type="image/png" href="img/favicon.png">
 <link rel="stylesheet" href="app.css">
 </head>
 <body data-agent="OFFLINE">
@@ -20,10 +21,12 @@
 		<symbol id="i-coffee" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8zM6 1v3M10 1v3M14 1v3"/></symbol>
 		<symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
 		<symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+		<symbol id="i-taegeuk" viewBox="0 0 24 24"><path d="M2 12a10 10 0 0 1 20 0a5 5 0 0 1-10 0a5 5 0 0 0-10 0z" fill="#F51E2B"/><path d="M2 12a5 5 0 0 0 10 0a5 5 0 0 1 10 0a10 10 0 0 1-20 0z" fill="#0B1F4E"/></symbol>
 	</defs>
 </svg>
 <div class="stage">
 	<aside class="guide guide-agent">
+		<img class="guide-wordmark" src="img/wordmark.png" alt="MOMIN">
 		<span class="role-tag"><svg width="16" height="16"><use href="#i-headset"/></svg>상담원 앱</span>
 		<h1>전화를 받고,<br>위험한 말은 막으세요</h1>
 		<p>실제로는 휴대폰 앱입니다. 이 화면을 휴대폰으로 열면 앱처럼 꽉 차게 보여요.</p>
@@ -40,7 +43,7 @@
 	<div class="device app-agent" id="agent-panel">
 		<div class="statusbar" aria-hidden="true"><span id="sb-time">9:41</span><span class="icons"><svg width="16" height="12" viewBox="0 0 16 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="4.5" y="5" width="3" height="7" rx="1"/><rect x="9" y="2" width="3" height="10" rx="1"/></svg><i></i></span></div>
 		<header class="appbar">
-			<span class="appbar-title"><span class="app-logo"><svg width="18" height="18"><use href="#i-shield"/></svg></span>MOMIN 상담</span>
+			<span class="appbar-title"><img class="app-logo-img" src="img/app-icon.png" alt="">MOMIN 상담</span>
 			<span class="state-pill"><span class="status-dot"></span><span id="agent-state-text" aria-live="polite"></span></span>
 			<button class="icon-btn" id="agent-disconnect" aria-label="나가기" title="나가기"><svg width="18" height="18"><use href="#i-logout"/></svg></button>
 			<span class="conn" style="display:none"><span class="dot" id="server-dot"></span><span id="server-text"></span></span>
@@ -48,7 +51,7 @@
 		<main class="screen">
 			<!-- 로그인 -->
 			<section class="screen-view view-login">
-				<span class="login-logo"><svg width="32" height="32"><use href="#i-headset"/></svg></span>
+				<img class="login-logo-img" src="img/app-icon.png" alt="">
 				<h1>상담을 시작할까요?</h1>
 				<p>접속하면 대기 상태가 되고, 민원인이 전화를 걸면 벨이 울려요.</p>
 				<label for="agent-id">상담원 이름 (영문·숫자)</label>
@@ -59,9 +62,9 @@
 			<!-- 대기 -->
 			<section class="screen-view view-idle">
 				<div class="idle-hero">
-					<span class="idle-icon"><svg width="40" height="40" class="idle-ready"><use href="#i-headset"/></svg><svg width="40" height="40" class="idle-away"><use href="#i-coffee"/></svg></span>
+					<span class="idle-icon"><img src="img/haetae.png" alt=""></span>
 					<h2><span class="idle-ready">전화 기다리는 중</span><span class="idle-away">자리 비움</span></h2>
-					<p><span class="idle-ready">전화가 오면 바로 알려 드릴게요</span><span class="idle-away">대기로 바꾸면 다시 전화를 받아요</span></p>
+					<p><span class="idle-ready">해태가 함께 지키고 있어요. 전화가 오면 바로 알려 드릴게요</span><span class="idle-away">대기로 바꾸면 다시 전화를 받아요</span></p>
 					<p class="hint" id="agent-name"></p>
 				</div>
 				<div class="queue-card">
@@ -98,7 +101,7 @@
 					<p class="timer" id="agent-timer"></p>
 				</div>
 				<div class="protect">
-					<svg width="20" height="20"><use href="#i-shield"/></svg>
+					<svg width="20" height="20"><use href="#i-taegeuk"/></svg>
 					<p><strong>보호 중</strong> · 민원인 목소리는 <strong id="agent-delay"></strong> 늦게 들려요. 위험한 말은 들리기 전에 차단하세요.</p>
 				</div>
 				<div class="risk-alert" id="agent-risk" hidden role="alert">

@@ -34,6 +34,10 @@ class TestConsoleEnabledTest {
 					.andExpect(content().string(containsString("<script src=\"console.js\">")));
 		}
 		mockMvc.perform(get("/test/console.js")).andExpect(status().isOk());
+		for (String image : new String[] { "img/wordmark.png", "img/app-icon.png", "img/haetae.png", "img/favicon.png",
+				"img/cloud.svg" }) {
+			mockMvc.perform(get("/test/" + image)).andExpect(status().isOk());
+		}
 		mockMvc.perform(get("/api/v1/status")).andExpect(status().isOk());
 	}
 }

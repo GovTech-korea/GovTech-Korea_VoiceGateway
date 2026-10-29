@@ -3,11 +3,16 @@
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
 
 :root {
-	--page: #eef1f5;
-	--page-text: #101828;
-	--page-text-2: #475467;
+	/* MOMIN 브랜드: 남색·빨강·흰색 (워드마크·해태 캐릭터에서 뽑은 색) */
+	--navy: #0B1F4E;
+	--navy-deep: #071640;
+	--brand-red: #F51E2B;
+	--cloud: #E3EAF6;
+	--page: #F4F6FB;
+	--page-text: #0B1F4E;
+	--page-text-2: #4A5878;
 	--green: #12b76a;
-	--red: #f04438;
+	--red: #F51E2B;
 	--amber: #f79009;
 	--voice: 0;
 	--font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
@@ -15,45 +20,45 @@
 }
 
 @media (prefers-color-scheme: dark) {
-	:root { --page: #090b0f; --page-text: #f2f4f7; --page-text-2: #98a2b3; }
+	:root { --page: #06112D; --page-text: #F2F5FB; --page-text-2: #9FAECB; --cloud: #12224A; }
 }
 
 /* ---------- 앱별 색 ---------- */
 
-/* 민원인 앱: 밝은 바탕, 초록 */
+/* 민원인 앱: 흰 바탕, 남색 */
 .app-citizen {
 	--bg: #ffffff;
-	--surface: #f4f6f8;
-	--text: #101828;
-	--text-2: #475467;
-	--text-3: #98a2b3;
-	--line: #e4e7ec;
-	--accent: #12b76a;
-	--accent-soft: #e7f8ef;
-	--accent-text: #0a7c48;
-	--sent: #12b76a;
-	--heard: #12b76a;
+	--surface: #F2F5FB;
+	--text: #0B1F4E;
+	--text-2: #4A5878;
+	--text-3: #94A0BC;
+	--line: #E3E8F2;
+	--accent: #0B1F4E;
+	--accent-soft: #EAF0FA;
+	--accent-text: #0B1F4E;
+	--sent: #0B1F4E;
+	--heard: #0B1F4E;
 	--mute: rgba(240, 68, 56, 0.2);
 	--muted: #98a2b3;
 	color-scheme: light;
 }
 
-/* 상담원 앱: 남색 바탕, 파랑 */
+/* 상담원 앱: 브랜드 남색 바탕, 빨강 포인트 */
 .app-agent {
-	--bg: #0f1729;
-	--surface: #18223a;
-	--surface-2: #212d49;
-	--text: #f2f5fb;
-	--text-2: #aab4c8;
-	--text-3: #6d7891;
-	--line: #26324d;
-	--accent: #4c7dff;
-	--accent-soft: #1d2b52;
-	--accent-text: #9db7ff;
-	--sent: #4c7dff;
-	--heard: #4cd38e;
-	--mute: rgba(240, 68, 56, 0.35);
-	--muted: #6d7891;
+	--bg: #0B1F4E;
+	--surface: #13296A;
+	--surface-2: #1C3580;
+	--text: #F5F7FC;
+	--text-2: #B9C4DE;
+	--text-3: #7E8DB5;
+	--line: #22397C;
+	--accent: #F51E2B;
+	--accent-soft: rgba(255, 255, 255, 0.07);
+	--accent-text: #FF8A91;
+	--sent: #F5F7FC;
+	--heard: #F5F7FC;
+	--mute: rgba(245, 30, 43, 0.45);
+	--muted: #7E8DB5;
 	color-scheme: dark;
 }
 
@@ -366,3 +371,117 @@ input:focus, select:focus { border-color: var(--accent); outline: none; }
 .file-pick .btn { padding: 10px 16px; font-size: 14px; }
 .file-name { font-size: 13px; color: var(--text); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-name.warn { color: #f04438; }
+
+
+/* =========================================================================
+ * MOMIN 브랜드 (워드마크·앱 아이콘·해태 캐릭터, 남색·빨강·흰색, 태극·구름 무늬)
+ * ========================================================================= */
+
+body {
+	background:
+		radial-gradient(60% 50% at 100% 0%, rgba(245, 30, 43, 0.07), transparent 70%),
+		radial-gradient(55% 45% at 0% 100%, rgba(11, 31, 78, 0.08), transparent 70%),
+		var(--page);
+}
+
+/* 이미지 로고 */
+.wordmark { height: 34px; width: auto; display: block; }
+.app-logo-img { width: 32px; height: 32px; border-radius: 9px; object-fit: cover; display: block; }
+.login-logo-img { width: 76px; height: 76px; border-radius: 22px; object-fit: cover; margin-bottom: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); }
+.appbar-wordmark { height: 22px; width: auto; display: block; }
+.appbar-sub { font-size: 13px; font-weight: 600; color: var(--text-2); padding-left: 10px; border-left: 1px solid var(--line); }
+.guide-wordmark { height: 30px; width: auto; display: block; margin-bottom: 22px; }
+@media (prefers-color-scheme: dark) { .guide-wordmark, .wordmark { background: #fff; border-radius: 10px; padding: 6px 10px; height: 42px; } }
+
+/* 옆 설명 */
+.guide .role-tag { letter-spacing: 0.01em; }
+.guide-agent .role-tag { background: var(--navy); color: #fff; }
+.guide-citizen .role-tag { background: #FFE8EA; color: var(--brand-red); }
+.guide li::before { background: var(--navy); color: #fff; }
+@media (prefers-color-scheme: dark) { .guide li::before { background: #fff; color: var(--navy); } }
+
+/* 휴대폰 틀: 브랜드 남색 테두리 */
+.device { box-shadow: 0 0 0 10px #0A1636, 0 0 0 11px #24376B, 0 30px 80px rgba(11, 31, 78, 0.35); }
+
+/* ---------- 시작 화면 ---------- */
+
+.landing { max-width: 1040px; padding-top: 32px; }
+.landing-top { margin-bottom: 24px; }
+.hero { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 24px; align-items: center; margin-bottom: 36px; }
+@media (max-width: 760px) { .hero { grid-template-columns: 1fr; text-align: center; } .hero-art { order: -1; } .values { justify-content: center; } }
+.eyebrow { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; color: var(--brand-red); margin-bottom: 14px; }
+.hero h1 { font-size: clamp(32px, 5.2vw, 52px); font-weight: 800; letter-spacing: -0.035em; line-height: 1.15; text-align: left; color: var(--page-text); }
+@media (max-width: 760px) { .hero h1 { text-align: center; } .eyebrow { justify-content: center; } }
+.hero .lead { text-align: inherit; margin: 18px 0 22px; max-width: 30em; font-size: 16px; }
+@media (max-width: 760px) { .hero .lead { margin-left: auto; margin-right: auto; } }
+.hero .lead strong { color: var(--brand-red); }
+.values { display: flex; gap: 10px; list-style: none; margin: 0; padding: 0; flex-wrap: wrap; }
+.values li { display: flex; align-items: baseline; gap: 6px; padding: 8px 14px; border-radius: 999px; background: #fff; box-shadow: 0 1px 2px rgba(11, 31, 78, 0.06), 0 6px 16px rgba(11, 31, 78, 0.06); font-size: 12px; color: var(--page-text-2); }
+.values b { font-size: 14px; color: var(--navy); }
+@media (prefers-color-scheme: dark) { .values li { background: #12224A; } .values b { color: #fff; } }
+
+.hero-art { position: relative; display: flex; flex-direction: column; align-items: center; }
+.hero-art::before { content: ""; position: absolute; top: 4%; width: 78%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #fff, var(--cloud)); }
+@media (prefers-color-scheme: dark) { .hero-art::before { background: radial-gradient(circle at 50% 40%, #1A2E66, #0B1F4E); } }
+.haetae { position: relative; width: min(340px, 80%); height: auto; animation: float 5s ease-in-out infinite; filter: drop-shadow(0 18px 24px rgba(11, 31, 78, 0.18)); }
+@keyframes float { 50% { transform: translateY(-8px); } }
+.haetae-name { position: relative; margin-top: 4px; font-size: 13px; font-weight: 700; color: #fff; background: var(--navy); padding: 6px 14px; border-radius: 999px; }
+.cloud { position: absolute; width: 150px; opacity: 0.9; pointer-events: none; }
+.cloud-a { top: 6%; left: -4%; }
+.cloud-b { bottom: 18%; right: -6%; width: 120px; transform: scaleX(-1); }
+@media (prefers-color-scheme: dark) { .cloud { opacity: 0.15; } }
+@media (prefers-reduced-motion: reduce) { .haetae { animation: none; } }
+
+.role { position: relative; overflow: hidden; }
+.role-agent { background: linear-gradient(160deg, #0B1F4E, #071640); color: #F5F7FC; }
+.role-agent::after { content: ""; position: absolute; right: -40px; top: -40px; width: 160px; height: 160px; border-radius: 50%; background: radial-gradient(circle, rgba(245, 30, 43, 0.35), transparent 70%); }
+.role-app-icon { width: 60px; height: 60px; border-radius: 17px; object-fit: cover; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35); }
+.role-agent .go { color: #FF8A91; }
+.role-citizen { background: #fff; color: var(--navy); border: 1px solid #E3E8F2; }
+.role-citizen .role-icon { background: var(--brand-red); }
+.role-citizen .go { color: var(--brand-red); }
+.role-citizen p { color: #4A5878; opacity: 1; }
+.flow li::before { background: var(--navy); color: #fff; }
+@media (prefers-color-scheme: dark) { .flow li::before { background: #fff; color: var(--navy); } .role-citizen { background: #12224A; color: #F5F7FC; border-color: #22397C; } .role-citizen p { color: #B9C4DE; } }
+
+/* ---------- 민원인 앱 ---------- */
+
+.app-citizen .appbar-title { gap: 0; }
+.avatar { width: 150px; height: 150px; background: radial-gradient(circle at 50% 40%, #fff, #E6ECF8); margin-bottom: 14px; }
+.avatar img { width: 128%; height: auto; margin-top: 6%; }
+.avatar { overflow: visible; }
+[data-citizen="IN_CALL"] .avatar { background: radial-gradient(circle at 50% 40%, #fff, #DCE5F7); box-shadow: 0 0 0 4px var(--navy); }
+.avatar::before, .avatar::after { border-color: var(--brand-red); }
+.app-citizen .call-hero h1 { font-weight: 800; }
+.app-citizen .picker select { background: var(--surface); color: var(--navy); }
+
+/* ---------- 상담원 앱 ---------- */
+
+.app-agent { background: radial-gradient(120% 60% at 50% 0%, #13296A, #0B1F4E 60%); }
+.idle-icon { width: 150px; height: 150px; background: radial-gradient(circle at 50% 40%, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.04)); overflow: visible; }
+.idle-icon img { width: 125%; height: auto; margin-top: 8%; filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.35)); }
+[data-agent="READY"] .idle-icon::after { border-color: rgba(245, 30, 43, 0.55); }
+[data-agent="AWAY"] .idle-icon { background: rgba(247, 144, 9, 0.14); }
+[data-agent="AWAY"] .idle-icon img { filter: grayscale(0.7) opacity(0.6); }
+.protect { background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.08); }
+.queue-card { border: 1px solid rgba(255, 255, 255, 0.06); }
+.queue-card svg { color: #FF8A91; }
+.ring-label { color: #FF8A91; }
+.call-top .hint { color: #FF8A91; }
+.btn-accent { box-shadow: 0 10px 24px rgba(245, 30, 43, 0.35); }
+
+/* 위험 구간 차단: 브랜드 빨강, 켜지면 흰 바탕에 빨간 글씨로 뒤집혀 맥박 */
+.mute-btn { background: var(--brand-red); box-shadow: 0 10px 24px rgba(245, 30, 43, 0.35); }
+[data-hold="on"] .mute-btn { background: #fff; color: var(--brand-red); animation: holding 1.4s ease-out infinite; }
+[data-hold="on"] .mute-btn .kbd { background: rgba(245, 30, 43, 0.12); }
+[data-hold="on"] .protect { background: rgba(245, 30, 43, 0.18); border-color: rgba(245, 30, 43, 0.45); }
+.risk-alert { background: rgba(245, 30, 43, 0.2); border-color: rgba(245, 30, 43, 0.6); }
+.risk-alert strong, .risk-alert svg, .caption-list li.risk { color: #FF8A91; }
+.app-agent .captions, .app-agent .listen { border: 1px solid rgba(255, 255, 255, 0.06); }
+
+/* 워드마크 원본은 흰 배경이라, 밝은 바탕에서는 흰색을 바탕에 섞어 사각형이 보이지 않게 한다 */
+@media (prefers-color-scheme: light) { .wordmark, .guide-wordmark { mix-blend-mode: multiply; } }
+
+/* 해태가 원 위로 살짝 튀어나오고 아래 글자는 가리지 않게 */
+.avatar, .idle-icon { margin-top: 28px; margin-bottom: 22px; }
+.avatar img, .idle-icon img { width: 108%; margin-top: -26%; }

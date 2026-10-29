@@ -256,3 +256,10 @@ details[open] > summary { margin-bottom: 10px; }
 #citizen-file-name.warn { color: var(--danger); }
 
 [hidden] { display: none !important; }
+
+/* MOMIN 브랜드 색 (남색·빨강) */
+:root { --accent: #0B1F4E; --danger: #F51E2B; --sent: #0B1F4E; --heard: #F51E2B; --mute: rgba(245, 30, 43, 0.2); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --accent: #8FA9E8; --danger: #FF6A72; --sent: #8FA9E8; --heard: #FF8A91; } }
+.console-wordmark { height: 30px; width: auto; display: block; margin-bottom: 6px; }
+@media (prefers-color-scheme: dark) { .console-wordmark { background: #fff; border-radius: 8px; padding: 4px 8px; height: 36px; } }
+@media (prefers-color-scheme: light) { .console-wordmark { mix-blend-mode: multiply; } }
