@@ -150,7 +150,7 @@ def hold(call_id: str, on: bool) -> None:
 
 - STT 서버 주소는 **실행 중에 바꿀 수 있습니다** (Colab·ngrok 주소가 바뀌어도 게이트웨이를 다시 켜지 않음). 다음에 연결되는 통화부터 적용됩니다.
   - 화면: 통합 콘솔(`/test/console.html`) → "STT 서버"에 Colab이 출력한 `https://…` 주소를 넣고 적용
-  - API: `PUT /api/v1/stt/endpoint` `{"url": "https://xxxx.ngrok-free.app"}` (비우면 끔), 확인은 `GET /api/v1/stt/endpoint`
+  - API: `PUT /api/v1/stt/endpoint` `{"url": "https://xxxx.ngrok-free.app"}` (비우면 끔), 확인은 `GET /api/v1/stt/endpoint`, 서버가 응답하는지는 `GET /api/v1/stt/endpoint/health` (게이트웨이가 STT 서버의 `GET /health`를 부름. 200이면 응답함, 본문의 `model`·`device`를 콘솔에 표시)
   - 설정 파일: `voicegateway.stt.url` (시작할 때의 주소)
 - 넣은 주소는 자동으로 맞춥니다: `https` → `wss`, `http` → `ws`, 경로가 없으면 `/ws/transcribe`, 쿼리가 없으면 `language=ko-KR`
 - 상담원이 전화를 받을 때 접속하고, 통화가 끝나면 `{"type":"stop"}`을 보낸 뒤 닫습니다. ngrok 안내 페이지를 건너뛰도록 `ngrok-skip-browser-warning` 헤더를 붙입니다.

@@ -1,5 +1,6 @@
 package com.govtech.voicegateway.domain.stt.api;
 
+import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -13,9 +14,12 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.govtech.voicegateway.domain.stt.SttEndpoint;
+import com.govtech.voicegateway.domain.stt.SttHealth;
+import com.govtech.voicegateway.domain.stt.SttHealthChecker;
 import com.govtech.voicegateway.domain.stt.SttProperties;
 
 @WebMvcTest(SttEndpointController.class)
@@ -30,6 +34,22 @@ class SttEndpointControllerTest {
 
 	@Autowired
 	private MockMvc mockMvc;
+
+	@MockitoBean
+	private SttHealthChecker healthChecker;
+
+	@Test
+	@DisplayName("STT 서버 상태 확인 결과를 그대로 돌려준다")
+	void health() throws Exception {
+		given(healthChecker.check()).willReturn(new SttHealth("ws://localhost:8100/ws/transcribe?language=ko-KR", true,
+				true, 12L, "nemotron.gguf", "gpu:0", null));
+
+		mockMvc.perform(get("/api/v1/stt/endpoint/health"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.reachable").value(true))
+				.andExpect(jsonPath("$.model").value("nemotron.gguf"))
+				.andExpect(jsonPath("$.latencyMs").value(12));
+	}
 
 	@Test
 	@DisplayName("Colab 주소를 넣으면 정리된 WebSocket 주소로 바꾸고, 조회하면 그 주소를 돌려준다")
