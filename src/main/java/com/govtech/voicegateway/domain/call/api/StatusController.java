@@ -5,6 +5,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.govtech.voicegateway.domain.call.CallCoordinator;
+import com.govtech.voicegateway.domain.stt.SttEndpoint;
 import com.govtech.voicegateway.domain.stt.SttProperties;
 import com.govtech.voicegateway.global.config.VoiceGatewayProperties;
 
@@ -21,9 +22,10 @@ public class StatusController {
 	private final CallCoordinator coordinator;
 	private final VoiceGatewayProperties properties;
 	private final SttProperties sttProperties;
+	private final SttEndpoint sttEndpoint;
 
 	@GetMapping("/api/v1/status")
 	public StatusResponse status() {
-		return StatusResponse.from(coordinator.snapshot(), properties, sttProperties);
+		return StatusResponse.from(coordinator.snapshot(), properties, sttProperties, sttEndpoint);
 	}
 }

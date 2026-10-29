@@ -26,7 +26,11 @@ import com.govtech.voicegateway.domain.call.message.ServerMessage;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.CallEndReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.RingCancelReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.StatusReason;
+import com.govtech.voicegateway.domain.protection.KeywordRiskDetector;
+import com.govtech.voicegateway.domain.stt.SttListener;
 import com.govtech.voicegateway.domain.stt.SttRelay;
+import com.govtech.voicegateway.domain.stt.SttRisk;
+import com.govtech.voicegateway.domain.stt.SttTranscript;
 import com.govtech.voicegateway.global.config.VoiceGatewayProperties;
 
 import lombok.RequiredArgsConstructor;
@@ -51,6 +55,7 @@ public class CallCoordinator {
 	private final RingTimer ringTimer;
 	private final DelayLines delayLines;
 	private final SttRelay sttRelay;
+	private final KeywordRiskDetector riskDetector;
 	private final Clock clock;
 
 	private final Map<String, Agent> agentsById = new HashMap<>();
@@ -212,7 +217,7 @@ public class CallCoordinator {
 		DelayLine delayLine = delayLines.open(Duration.ofMillis(properties.delayMs()), agent.connection::sendAudio);
 		call.delayLine = delayLine;
 		delayLinesByCall.put(callId, delayLine);
-		SttRelay.Session stt = sttRelay.open(callId);
+		SttRelay.Session stt = sttRelay.open(callId, new CallSttListener(call, agent.connection));
 		call.stt = stt;
 		call.connectedAtEpochMs = clock.millis();
 		audioSinks.put(call.citizen.id(), frame -> {
@@ -449,6 +454,74 @@ public class CallCoordinator {
 		private Agent(String agentId, ClientConnection connection) {
 			this.agentId = agentId;
 			this.connection = connection;
+		}
+	}
+
+	private synchronized boolean isConnected(Call call) {
+		return callsById.get(call.callId) == call && call.state == CallState.CONNECTED;
+	}
+
+	/** 통화 중일 때만 보낸다. 확인과 보내기를 한 잠금 안에서 해서, 통화 종료 알림 뒤에 늦은 메시지가 가지 않게 한다 */
+	private synchronized void sendIfConnected(Call call, ClientConnection connection, ServerMessage message) {
+		if (isConnected(call)) {
+			connection.send(message); // 대기열에 넣기만 해서 잠금 안에서 불러도 막히지 않는다
+		}
+	}
+
+	/**
+	 * 통화 하나의 STT 결과 처리 (STT 연결 스레드에서 불린다).
+	 * 자막은 상담원에게 보내고, 위험 발화면 그 발화에서 아직 상담원에게 나가지 않은 부분을 차단한 뒤 상담원에게 한 번 알린다.
+	 * 말하는 도중(중간 결과)에는 발화 시작부터 아직 나가지 않은 부분 전부를, 확정되면 그 발화 끝까지만 차단한다.
+	 * 발화 시작 시각을 모르면 엉뚱한 구간을 지우지 않도록 차단하지 않고 알리기만 한다.
+	 */
+	private final class CallSttListener implements SttListener {
+
+		private final Call call;
+		private final ClientConnection agentConnection;
+		private final Set<String> notified = ConcurrentHashMap.newKeySet();
+
+		private CallSttListener(Call call, ClientConnection agentConnection) {
+			this.call = call;
+			this.agentConnection = agentConnection;
+		}
+
+		@Override
+		public void onTranscript(SttTranscript transcript) {
+			if (!isConnected(call)) {
+				return;
+			}
+			sendIfConnected(call, agentConnection, new ServerMessage.Transcript(call.callId, transcript.utteranceId(),
+					transcript.text(), transcript.isFinal()));
+			riskDetector.detect(transcript.text()).ifPresent(match -> protect(transcript.utteranceId(), transcript.text(),
+					transcript.fromEpochMs(), transcript.isFinal() ? transcript.toEpochMs() : null, match.riskType(),
+					match.severity(), null, match.keyword()));
+		}
+
+		@Override
+		public void onRisk(SttRisk risk) {
+			if (isConnected(call)) {
+				protect("risk-" + risk.fromEpochMs() + "-" + risk.toEpochMs(), risk.text(), risk.fromEpochMs(),
+						risk.toEpochMs(), risk.riskType(), risk.severity(), risk.target(), null);
+			}
+		}
+
+		@Override
+		public void onHold(boolean on) {
+			if (isConnected(call) && holdMute(call.callId, on).isPresent()) {
+				sendIfConnected(call, agentConnection, new ServerMessage.MuteHoldChanged(call.callId, on));
+			}
+		}
+
+		/** @param toEpochMs null이면 시작 시각 뒤로 아직 나가지 않은 부분 전부 */
+		private void protect(String key, String text, Long fromEpochMs, Long toEpochMs, String riskType, String severity,
+				String target, String keyword) {
+			int muted = fromEpochMs == null ? 0 : mute(call.callId, fromEpochMs, toEpochMs).orElse(0);
+			if (notified.add(key)) {
+				// 발화 본문은 개인정보를 담을 수 있어 로그에는 유형과 찾은 단어만 남긴다
+				log.info("위험 발화 감지: {} {} {} '{}' (무음 {}프레임)", call.callId, riskType, severity, keyword, muted);
+				sendIfConnected(call, agentConnection, new ServerMessage.RiskDetected(call.callId, key, text, riskType,
+						severity, target, keyword, muted));
+			}
 		}
 	}
 

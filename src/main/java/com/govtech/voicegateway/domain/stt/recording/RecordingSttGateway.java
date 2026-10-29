@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 import com.govtech.voicegateway.domain.stt.SttAudioFormat;
 import com.govtech.voicegateway.domain.stt.SttChunk;
 import com.govtech.voicegateway.domain.stt.SttGateway;
+import com.govtech.voicegateway.domain.stt.SttListener;
 import com.govtech.voicegateway.domain.stt.SttProperties;
 import com.govtech.voicegateway.domain.stt.SttStream;
 
@@ -37,7 +38,7 @@ public class RecordingSttGateway implements SttGateway {
 	private final SttProperties properties;
 
 	@Override
-	public SttStream open(String callId, SttAudioFormat format) {
+	public SttStream open(String callId, SttAudioFormat format, SttListener listener) {
 		// 같은 callId로 다시 걸어도 이전 기록을 덮어쓰지 않게 시작 시각을 붙인다
 		Path file = properties.dumpDir() == null ? null
 				: properties.dumpDir().toAbsolutePath().resolve(callId + "-" + System.currentTimeMillis() + ".pcm");
