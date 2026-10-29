@@ -99,6 +99,18 @@ grep -E "통화|차단|ERROR|WARN" runtime/logs/server.log           # 중요한
 - 마이크는 `localhost`나 HTTPS에서만 쓸 수 있습니다. 다른 기기에서 IP로 접속하면 테스트 톤·오디오 파일을 쓰거나 아래 터널을 씁니다.
 - `dump-dir`을 지정했으면 통합 콘솔의 "STT로 보낸 음성 듣기"에서 STT가 받은 음성을 그대로 들을 수 있습니다.
 
+### STT 서버 연결 (실시간 자막)
+
+STT 서버가 연결돼 있으면 상담원 화면 통화 중에 **민원인 말의 실시간 자막**이 뜨고, 욕설·위협 단어가 나오면 그 발화가 **자동으로 차단**되며 경고가 뜹니다.
+
+1. STT 서버를 켭니다
+   - **실제 모델**: STT 담당 Colab 노트북(`streaming_asr1_colab.ipynb`)을 실행하고 출력된 `https://xxxx.ngrok-free.app` 주소를 복사
+   - **모델 없이 시험**: `pip install websockets && python tools/mock-stt/mock_stt_server.py` → `http://localhost:8100` (정해진 대사를 자막처럼 돌려줌)
+2. 통합 콘솔(`/test/console.html`) → **STT 서버**에 주소를 넣고 `적용` (다음 통화부터, 게이트웨이 재시작 필요 없음)
+3. 상담원·민원인 화면에서 통화
+
+연동 형식은 [docs/stt-integration.md](docs/stt-integration.md) 6장을 봅니다.
+
 ### 팀원이 원격으로 들어와 시험하기 (임시 공개 주소)
 
 ```bash
@@ -148,6 +160,7 @@ kill $(cat runtime/logs/server.pid runtime/logs/tunnel.pid)                     
 | `voicegateway.delay-ms` | `800` | 민원인 → 상담원 음성 지연 (ms). 0이면 지연 없음 |
 | `voicegateway.ring-timeout-ms` | `20000` | 상담원이 벨을 받지 않으면 다음 상담원에게 넘기는 시간 (ms) |
 | `voicegateway.stt.format` | `PCM16_16K` | STT로 보내는 형식. `PCM16_16K`(받은 그대로) / `PCM16_8K`(8kHz로 다운샘플) |
+| `voicegateway.stt.url` | 없음 | STT 서버 주소 (시작할 때 값). 실행 중에는 콘솔이나 `PUT /api/v1/stt/endpoint`로 바꿈 |
 | `voicegateway.stt.dump-dir` | 없음 | 지정하면 STT로 보낸 음성을 `<callId>-<시작ms>.pcm`으로 기록 |
 
 | HTTP API | 설명 |
@@ -155,6 +168,7 @@ kill $(cat runtime/logs/server.pid runtime/logs/tunnel.pid)                     
 | `POST /api/v1/calls/{callId}/mute` | 아직 상담원에게 나가지 않은 민원인 음성을 무음 처리. 본문 `{"fromEpochMs","toEpochMs"}`로 구간 지정 가능 (생략 시 전체) |
 | `PUT /api/v1/calls/{callId}/mute-hold` | 차단 유지 켜기/끄기. 본문 `{"hold": true}`면 아직 나가지 않은 음성과 이후 들어오는 음성을 계속 무음 처리, `{"hold": false}`면 해제 (STT에는 원본 그대로) |
 | `GET /api/v1/status` | 설정, 상담원·대기열·통화·STT 전달 현황 |
+| `GET` / `PUT /api/v1/stt/endpoint` | STT 서버 주소 확인·변경. 본문 `{"url": "https://…"}` (비우면 끔) |
 | `GET /api/v1/stt/recordings` | STT 기록 목록 (`dump-dir` 지정 시) |
 | `GET /api/v1/stt/recordings/{name}` | STT 기록을 WAV로 받기 |
 
