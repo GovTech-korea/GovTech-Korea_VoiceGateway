@@ -41,5 +41,8 @@ out/
 CLAUDE.md
 CLAUDE.local.md
 
+### 실행 중 생기는 파일 (로그, STT 음원 기록) ###
+runtime/
+
 ### macOS ###
 .DS_Store
