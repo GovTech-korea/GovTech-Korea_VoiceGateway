@@ -123,13 +123,16 @@ class SttRecordingsTest {
 		RecordingSttGateway gateway = new RecordingSttGateway(properties);
 		SttRecordings recordings = new SttRecordings(properties, gateway);
 		SttStream stream = gateway.open("call-1", SttAudioFormat.PCM16_16K, SttListener.NONE);
-		stream.send(new SttChunk("call-1", Role.CITIZEN, 0, 1_000, SttAudioFormat.PCM16_16K, new byte[320]));
-		String name = await(recordings).name();
+		String name;
+		try {
+			stream.send(new SttChunk("call-1", Role.CITIZEN, 0, 1_000, SttAudioFormat.PCM16_16K, new byte[320]));
+			name = await(recordings).name();
 
-		assertThat(recordings.delete(name)).isEqualTo(SttRecordings.Deletion.IN_USE);
-		assertThat(dir.resolve(name)).exists();
-
-		stream.close();
+			assertThat(recordings.delete(name)).isEqualTo(SttRecordings.Deletion.IN_USE);
+			assertThat(dir.resolve(name)).exists();
+		} finally {
+			stream.close(); // 단언이 실패해도 기록 스레드·파일을 남기지 않는다
+		}
 		long deadline = System.currentTimeMillis() + 2000;
 		while (gateway.isWriting(name) && System.currentTimeMillis() < deadline) {
 			Thread.sleep(10);
