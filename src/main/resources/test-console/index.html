@@ -33,13 +33,7 @@
 	<section class="hero">
 		<div class="hero-text">
 			<p class="eyebrow"><svg width="16" height="16"><use href="#i-taegeuk"/></svg>모두의 민원 · AI 민원 보호 서비스</p>
-			<h1>상담사를 지키고,<br>국민의 시간을 지킨다.</h1>
-			<p class="lead">민원인의 목소리는 상담사에게 <strong><span id="delay-ms">0.8초</span> 늦게</strong> 도착합니다. 그 사이 AI가 위험한 말을 찾아, 상담사가 듣기 전에 지웁니다.</p>
-			<ul class="values">
-				<li><b>보호</b>Protection</li>
-				<li><b>공정</b>Fairness</li>
-				<li><b>효율</b>Efficiency</li>
-			</ul>
+			<h1>AI가 욕설·위험을 감지해<br>상담사를 보호합니다</h1>
 		</div>
 		<div class="hero-art" aria-hidden="true">
 			<img class="cloud cloud-a" src="img/cloud.svg" alt="">
@@ -86,7 +80,8 @@
 		const s = await res.json();
 		dot.className = 'dot ok';
 		text.textContent = '서버 연결됨';
-		document.getElementById('delay-ms').textContent = `${s.delayMs / 1000}초`;
+		const delay = document.getElementById('delay-ms');
+		if (delay) delay.textContent = `${s.delayMs / 1000}초`;
 	} catch {
 		dot.className = 'dot bad';
 		text.textContent = '서버 응답 없음';
