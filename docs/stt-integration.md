@@ -218,12 +218,12 @@ pcm = message[12:]
 
 실시간 연결이 없어도, STT가 받았을 음성을 그대로 받아 모델을 시험할 수 있습니다.
 
-1. 게이트웨이를 기록 옵션으로 실행: `--voicegateway.stt.dump-dir=build/stt-dump`
+1. 게이트웨이를 기록 옵션으로 실행: `--voicegateway.stt.dump-dir=runtime/stt-dump`
 2. 테스트 화면(`/test`)에서 민원인·상담원으로 통화
 3. 기록 받기
    - 통합 콘솔(`/test/console.html`)의 "STT로 보낸 음성 듣기"에서 WAV로 듣거나 받기
    - 또는 `GET /api/v1/stt/recordings`(목록), `GET /api/v1/stt/recordings/{name}`(WAV)
-   - 또는 서버의 `build/stt-dump/<callId>-<시작 ms>.pcm` (raw PCM, 2장 형식)
+   - 또는 서버의 `runtime/stt-dump/<callId>-<시작 ms>.pcm` (raw PCM, 2장 형식)
 
 ```python
 import numpy as np

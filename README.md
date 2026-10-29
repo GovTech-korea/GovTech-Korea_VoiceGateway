@@ -61,7 +61,23 @@ git switch develop
 STT로 보낸 음성을 파일로 남기려면 기록 폴더를 지정해 실행합니다.
 
 ```bash
-./gradlew bootRun --args='--voicegateway.stt.dump-dir=build/stt-dump'
+./gradlew bootRun --args='--voicegateway.stt.dump-dir=runtime/stt-dump'
+```
+
+### 실행 중 생기는 파일: `runtime/`
+
+로그와 음원 기록은 프로젝트 안 `runtime/` 폴더 한 곳에 모읍니다. `.gitignore`에 들어 있어 커밋되지 않습니다.
+
+| 경로 | 내용 |
+|---|---|
+| `runtime/logs/server.log` | 게이트웨이 로그 (상담원 등록, 통화 연결·종료, 차단, STT 스트림, 오류) |
+| `runtime/logs/tunnel.log` | 터널 로그 (공개 주소, 연결·재연결) |
+| `runtime/logs/*.pid` | 백그라운드로 켠 프로세스 번호 (끌 때 사용) |
+| `runtime/stt-dump/<callId>-<시작 ms>.pcm` | STT로 보낸 음성 (raw PCM16LE) |
+
+```bash
+tail -f runtime/logs/server.log                                  # 로그 실시간 보기
+grep -E "통화|차단|ERROR|WARN" runtime/logs/server.log           # 중요한 줄만
 ```
 
 ## 테스트 화면 (앱 없이 시험하기)
@@ -92,8 +108,22 @@ cloudflared tunnel --url http://localhost:8080
 
 출력된 `https://xxxx.trycloudflare.com/test` 를 팀원에게 보내면 됩니다. HTTPS라서 팀원 기기에서도 마이크를 쓸 수 있습니다.
 
-- 터널을 다시 켜면 주소가 바뀝니다 (게이트웨이만 재시작하면 그대로)
+- 터널을 다시 켜면 주소가 바뀝니다 (게이트웨이만 재시작하면 그대로). 와이파이가 잠깐 끊기는 정도는 터널이 스스로 다시 연결합니다
 - 시험하는 동안 Mac이 잠들지 않게 하고, 끝나면 터널을 끕니다. 인증이 없으니 주소는 팀원에게만 보냅니다
+
+터미널을 닫아도 계속 켜 두려면 백그라운드로 실행합니다 (로그는 `runtime/logs/`).
+
+```bash
+mkdir -p runtime/logs
+nohup ./gradlew bootRun --args='--voicegateway.stt.dump-dir=runtime/stt-dump' > runtime/logs/server.log 2>&1 &
+echo $! > runtime/logs/server.pid
+nohup cloudflared tunnel --no-autoupdate --url http://localhost:8080 > runtime/logs/tunnel.log 2>&1 &
+echo $! > runtime/logs/tunnel.pid
+nohup caffeinate -dimsu -w $(cat runtime/logs/tunnel.pid) > /dev/null 2>&1 &   # 터널이 켜져 있는 동안 잠자기 방지
+
+grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' runtime/logs/tunnel.log | head -1   # 공개 주소 확인
+kill $(cat runtime/logs/server.pid runtime/logs/tunnel.pid)                         # 모두 끄기
+```
 
 ## 빌드와 테스트
 
