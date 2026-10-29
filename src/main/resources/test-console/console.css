@@ -98,12 +98,12 @@ a { color: var(--accent); }
 	min-width: 0;
 	box-shadow: 0 1px 2px rgba(11, 31, 78, 0.04), 0 8px 24px rgba(11, 31, 78, 0.05);
 }
-.panel-agent { border-top: 4px solid var(--navy); }
-.panel-citizen { border-top: 4px solid var(--brand-red); }
-@media (prefers-color-scheme: dark) { .panel-agent { border-top-color: #8FA9E8; } }
+/* 역할 색은 타임라인·소리 막대와 맞춘다: 민원인 = --sent, 상담원 = --heard */
+.panel-agent { border-top: 4px solid var(--heard); }
+.panel-citizen { border-top: 4px solid var(--sent); }
 .role-dot { width: 10px; height: 10px; border-radius: 50%; }
-.role-dot.agent { background: var(--sent); }
-.role-dot.citizen { background: var(--heard); }
+.role-dot.agent { background: var(--heard); }
+.role-dot.citizen { background: var(--sent); }
 
 .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
 
