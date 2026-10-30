@@ -158,6 +158,11 @@ input:focus, select:focus { border-color: var(--accent); outline: none; }
 	.appbar { padding-top: max(14px, env(safe-area-inset-top)); }
 	.screen { padding-bottom: max(24px, env(safe-area-inset-bottom)); }
 	.guide { display: none; }
+	/* 바깥 페이지는 보이는 화면 높이에 딱 맞추고 스크롤하지 않는다. 스크롤은 앱 안(.screen)에서만.
+	 * 100vh는 주소창이 숨었을 때 높이라 앱(100dvh) 아래에 여백이 생기고 페이지가 더 내려갔다 */
+	html:has(.stage), body:has(.stage) { height: 100%; min-height: 0; overflow: hidden; overscroll-behavior: none; }
+	.stage { min-height: 0; height: 100vh; height: 100dvh; }
+	.screen { overscroll-behavior: contain; }
 }
 
 /* ---------- 공통 조각 ---------- */
