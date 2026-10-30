@@ -3,6 +3,7 @@ package com.govtech.voicegateway.domain.protection;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import org.springframework.stereotype.Component;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Component;
  * <li>위협은 뜻이 분명한 구절만, 띄어쓰기를 지우고 찾는다 ("가만 두지 않", "죽여 버" 등)</li>
  * <li>정상 민원에도 나오는 말("찾아가서", "닥쳐서", "꺼져 있어요", 성희롱 신고 등)은 넣지 않는다</li>
  * <li>욕설을 품은 정상 단어(시발점, 질병신고, 신분증 등)는 먼저 지우고 본다</li>
+ * <li>"새끼"는 동물·손가락에도 쓰므로 욕으로만 쓰이는 형태(야 이 새끼, 나쁜 새끼, 새끼야)일 때만 찾는다</li>
  * </ul>
  */
 @Component
@@ -26,23 +28,38 @@ public class KeywordRiskDetector {
 	public record Match(String keyword, String riskType, String severity) {
 	}
 
-	private record Rule(String keyword, String riskType, String severity, boolean ignoreSpaces) {
+	private record Rule(String keyword, Pattern pattern, String riskType, String severity, boolean ignoreSpaces) {
 	}
 
 	/** 욕설 단어를 품었지만 정상인 말 */
 	private static final List<String> SAFE_WORDS = List.of("시발점", "시발역", "시발택시", "질병신", "병신청", "신분증", "등신대");
+
+	/**
+	 * 욕으로만 쓰이는 "새끼": 부르는 말(야 이 새끼, 새끼야, 새끼들아, 새꺄)과 욕 형용사(나쁜·미친 새끼).
+	 * "이/그 새끼"는 동물 민원("이 새끼들 분양하려고요")에도 나오고 중간 결과가 "그 새끼"에서 잘리기도 해서 보지 않는다.
+	 */
+	private static final String SAEKKI_FORMS = "(?:새끼|새꺄|색기|새키)";
+	private static final Pattern SAEKKI = Pattern.compile(
+			"(?:(?<![가-힣])야\\s?이?\\s?" + SAEKKI_FORMS
+					+ "|(?:나쁜|미친|썩을|망할|못된|더러운|빌어먹을)\\s?" + SAEKKI_FORMS
+					+ "|새꺄"
+					+ "|새끼(?:야|들아)(?![가-힣]))"
+					+ "(?!\\s*(?:고양이|강아지|돼지|오리|손가락|발가락|줄))");
 
 	// 위협이 욕설보다 위험하므로 먼저 본다
 	private static final List<Rule> RULES = Stream.of(
 			rules("THREAT", "HIGH", true, "죽여버", "죽여줄", "죽인다", "죽일거", "죽일줄", "가만두지않", "가만안둬", "가만안둘", "불질러",
 					"칼로찔", "찔러버"),
 			rules("ABUSE", "MEDIUM", false, "씨발", "시발", "씨팔", "시팔", "씨바", "쉬발", "개새끼", "개색기", "병신", "븅신", "좆", "존나",
-					"지랄", "미친놈", "미친년", "또라이", "썅", "엿먹어"))
+					"지랄", "미친놈", "미친년", "또라이", "썅", "엿먹어"),
+			List.of(new Rule("새끼", SAEKKI, "ABUSE", "MEDIUM", false)))
 			.flatMap(List::stream)
 			.toList();
 
 	private static List<Rule> rules(String riskType, String severity, boolean ignoreSpaces, String... keywords) {
-		return Arrays.stream(keywords).map(k -> new Rule(k, riskType, severity, ignoreSpaces)).toList();
+		return Arrays.stream(keywords)
+				.map(k -> new Rule(k, Pattern.compile(Pattern.quote(k)), riskType, severity, ignoreSpaces))
+				.toList();
 	}
 
 	public Optional<Match> detect(String text) {
@@ -56,7 +73,7 @@ public class KeywordRiskDetector {
 		String compact = cleaned.replaceAll("\\s+", "");
 		String spaced = cleaned;
 		return RULES.stream()
-				.filter(rule -> (rule.ignoreSpaces() ? compact : spaced).contains(rule.keyword()))
+				.filter(rule -> rule.pattern().matcher(rule.ignoreSpaces() ? compact : spaced).find())
 				.findFirst()
 				.map(rule -> new Match(rule.keyword(), rule.riskType(), rule.severity()));
 	}
