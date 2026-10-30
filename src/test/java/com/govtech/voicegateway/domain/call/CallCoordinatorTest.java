@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import com.govtech.voicegateway.domain.audio.Announcement;
 import com.govtech.voicegateway.domain.audio.DelayLines;
 import com.govtech.voicegateway.domain.call.message.ClientMessage;
 import com.govtech.voicegateway.domain.call.message.ErrorCode;
@@ -49,7 +51,7 @@ class CallCoordinatorTest {
 		stt = new FakeSttGateway();
 		SttRelay sttRelay = new SttRelay(new SttProperties(SttAudioFormat.PCM16_16K, null, null), java.util.List.of(stt));
 		coordinator = new CallCoordinator(new VoiceGatewayProperties(DELAY_MS, RING_TIMEOUT_MS), ringTimer, delayLines,
-				sttRelay, new KeywordRiskDetector(), clock);
+				sttRelay, new KeywordRiskDetector(), new Announcement(List.of(frame(8), frame(9))), clock);
 	}
 
 	/** 시간을 진행시키고 지연 버퍼에서 때가 된 음성을 내보낸다. */
@@ -552,6 +554,62 @@ class CallCoordinatorTest {
 			assertThat(agent.messages).filteredOn(m -> m instanceof ServerMessage.RiskDetected || m instanceof ServerMessage.MuteHoldChanged)
 					.extracting(Object::getClass)
 					.containsExactly(ServerMessage.RiskDetected.class, ServerMessage.MuteHoldChanged.class);
+		}
+
+		@Test
+		@DisplayName("차단이 시작되면 민원인에게 안내 음성을 실시간으로 들려주고, 그동안 상담원 음성은 민원인에게 가지 않는다")
+		void announcesToCitizenOnHold() {
+			citizen.audio.clear();
+			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "시발", false, clock.millis(), null));
+			coordinator.relayAudio(agent, frame(5)); // 안내 중 상담원 음성
+
+			elapse(0);
+			assertThat(citizen.audio).containsExactly(frame(8)); // 20ms에 한 프레임씩
+			elapse(20);
+			coordinator.relayAudio(agent, frame(6)); // 안내가 끝난 뒤
+
+			assertThat(citizen.audio).containsExactly(frame(8), frame(9), frame(6));
+		}
+
+		@Test
+		@DisplayName("안내가 끝난 뒤 차단 유지 중에 새 위험 발화가 와도 안내를 다시 틀지 않는다")
+		void announcesOncePerHold() {
+			SttListener listener = stt.listener("call-1");
+			listener.onTranscript(new SttTranscript("call-1-0", "시발", false, clock.millis(), null));
+			elapse(0);
+			elapse(20);
+			citizen.audio.clear();
+
+			listener.onTranscript(new SttTranscript("call-1-1", "병신아", false, clock.millis(), null));
+			elapse(100);
+
+			assertThat(citizen.audio).isEmpty();
+		}
+
+		@Test
+		@DisplayName("통화가 끝나면 안내를 멈춘다")
+		void announcementStopsOnHangup() {
+			citizen.audio.clear();
+			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "시발", false, clock.millis(), null));
+			elapse(0);
+			coordinator.handle(citizen, new ClientMessage.Hangup("call-1"));
+			elapse(100);
+
+			assertThat(citizen.audio).containsExactly(frame(8));
+		}
+
+		@Test
+		@DisplayName("상담원이 차단을 풀면 안내를 멈추고 상담원 음성을 바로 보낸다")
+		void releaseStopsAnnouncement() {
+			citizen.audio.clear();
+			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "시발", false, clock.millis(), null));
+			elapse(0);
+
+			coordinator.holdMute("call-1", false);
+			coordinator.relayAudio(agent, frame(6));
+			elapse(100);
+
+			assertThat(citizen.audio).containsExactly(frame(8), frame(6));
 		}
 
 		@Test
