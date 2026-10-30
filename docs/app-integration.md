@@ -2,7 +2,7 @@
 
 민원인 앱·상담원 앱(Android)과 VOICE_GATEWAY 사이의 연동 규격입니다.
 
-- 버전: v2.2 (2026-10-29)
+- 버전: v2.3 (2026-10-30)
 - 상태: 규격 확정, 게이트웨이 구현 진행 중
 
 ## 1. 전체 구조
@@ -132,8 +132,8 @@
 | `connected` | `{"type":"connected","callId":"call-0001","peerRole":"CITIZEN","delayMs":800}` | 통화 연결, 음성 시작. `delayMs`는 민원인 음성 지연 시간 |
 | `call-ended` | `{"type":"call-ended","callId":"call-0001","reason":"HANGUP_CITIZEN"}` | 통화 종료 |
 | `transcript` | `{"type":"transcript","callId":"call-0001","utteranceId":"call-0001-3","text":"안녕하세","final":false}` | 민원인 말의 실시간 자막 (STT 서버가 연결돼 있을 때만). 같은 `utteranceId`로 중간 결과(`final:false`)가 여러 번 오고, 문장이 끝나면 `final:true`로 한 번 더 온다. 같은 줄을 덮어쓰면 된다 |
-| `risk-detected` | `{"type":"risk-detected","callId":"call-0001","utteranceId":"call-0001-4","text":"…","riskType":"ABUSE","severity":"MEDIUM","target":null,"keyword":"개새끼","mutedFrames":40}` | 위험 발화를 찾아 그 발화에서 아직 들리지 않은 부분을 자동으로 차단함 (발화마다 한 번). `riskType`: `ABUSE`, `THREAT`, `SEXUAL` / `severity`: `LOW`~`CRITICAL` / `mutedFrames`×20ms만큼 차단. 상담원 화면에 경고를 띄운다 |
-| `mute-hold-changed` | `{"type":"mute-hold-changed","callId":"call-0001","hold":true}` | STT·위험 판단이 차단 유지를 켜거나 끔. 화면의 차단 버튼 상태를 맞춘다 |
+| `risk-detected` | `{"type":"risk-detected","callId":"call-0001","utteranceId":"call-0001-4","text":"…","riskType":"ABUSE","severity":"MEDIUM","target":null,"keyword":"개새끼","mutedFrames":40}` | 위험 발화를 찾아 그 발화에서 아직 들리지 않은 부분을 지우고 **차단 유지를 자동으로 켬** (발화마다 한 번). 상담원이 `PUT /api/v1/calls/{callId}/mute-hold` `{"hold":false}`로 풀 때까지 민원인 음성은 무음으로 간다. `riskType`: `ABUSE`, `THREAT`, `SEXUAL` / `severity`: `LOW`~`CRITICAL` / `mutedFrames`×20ms만큼 차단. 상담원 화면에 경고를 띄운다 |
+| `mute-hold-changed` | `{"type":"mute-hold-changed","callId":"call-0001","hold":true}` | 위험 발화 감지(`risk-detected` 직후)나 STT가 차단 유지를 켜거나 끔. 화면의 차단 버튼을 "차단 중 · 눌러서 해제"로 맞춘다 |
 
 ### 게이트웨이 → 민원인 앱
 
@@ -276,6 +276,7 @@ override fun onMessage(webSocket: WebSocket, text: String) {
 
 | 버전 | 날짜 | 내용 |
 |---|---|---|
+| v2.3 | 2026-10-30 | `risk-detected` 직후 차단 유지가 자동으로 켜지고 `mute-hold-changed`(hold=true)가 감. 상담원이 풀 때까지 유지 (메시지 형식 변경 없음) |
 | v2.2 | 2026-10-29 | 상담원 앱에 `transcript`(실시간 자막), `risk-detected`(위험 발화 자동 차단 알림), `mute-hold-changed` 추가. 앱이 모르면 무시해도 통화는 그대로 동작 |
 | v2.1 | 2026-10-26 | 3절에 상담원 전원 거절 시 동작 명시 (메시지 변경 없음) |
 | v2 | 2026-10-26 | 큐·자동 배정·상담원 벨(ringing/accept/reject) 추가. 상담원 앱은 연결 유지(register), 민원인 앱은 통화마다 연결(join). `peer-joined`/`peer-left`/`joined`/`leave` 제거 → `connected`/`call-ended`/`hangup`으로 대체 |

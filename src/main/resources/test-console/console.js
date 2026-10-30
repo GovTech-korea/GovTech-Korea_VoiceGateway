@@ -419,6 +419,7 @@ const agent = {
 	stopTimer: null,
 	hold: false,
 	holdPending: false,
+	holdPushed: false,
 	player: new Player(),
 	log: $('agent-log'),
 };
@@ -500,8 +501,9 @@ function agentMessage(msg) {
 			showRisk(msg);
 			break;
 		case 'mute-hold-changed':
+			if (agent.holdPending) agent.holdPushed = true; // 요청 응답보다 이 알림이 맞을 수 있어 응답 뒤 다시 조회한다
 			setHold(msg.hold);
-			logTo(agent.log, 'sys', msg.hold ? 'STT가 차단 유지를 켰습니다' : 'STT가 차단 유지를 껐습니다');
+			logTo(agent.log, 'sys', msg.hold ? '자동 차단 유지 켜짐 (해제할 때까지 민원인 음성 무음)' : '자동 차단 유지 꺼짐');
 			break;
 	}
 	agentUi();
@@ -630,9 +632,9 @@ function showRisk(msg) {
 	if (alert) {
 		alert.hidden = false;
 		setText('agent-risk-title', `${label} 감지`);
-		setText('agent-risk-detail', ` · 들리기 전에 ${msg.mutedFrames * 20}ms를 차단했어요`);
+		setText('agent-risk-detail', ' · 민원인 목소리를 막았어요. 차단 버튼을 눌러야 다시 들려요');
 		clearTimeout(showRisk.timer);
-		showRisk.timer = setTimeout(() => (alert.hidden = true), 6000);
+		showRisk.timer = setTimeout(() => (alert.hidden = true), 10000);
 	}
 	logTo(agent.log, 'err', `위험 발언 감지(${label}, ${msg.severity}): "${msg.text}" → ${msg.mutedFrames}프레임 차단`);
 }
@@ -647,6 +649,7 @@ async function toggleHold() {
 	const callId = agent.callId;
 	const on = !agent.hold;
 	agent.holdPending = true;
+	agent.holdPushed = false;
 	setHoldBusy(true);
 	setHold(on);
 	try {
@@ -658,7 +661,7 @@ async function toggleHold() {
 		if (agent.callId !== callId) return;
 		if (!res.ok) throw new Error(`HTTP ${res.status}`);
 		const body = await res.json();
-		setHold(body.hold);
+		setHold(agent.holdPushed ? await serverHold(callId, body.hold) : body.hold);
 		logTo(agent.log, 'sys', body.hold ? `차단 유지 켬 (대기 중이던 ${body.mutedFrames}프레임 무음)` : '차단 유지 끔');
 	} catch (e) {
 		if (agent.callId === callId) setHold(!on); // 서버에 반영되지 않았으면 화면도 되돌린다
@@ -666,6 +669,18 @@ async function toggleHold() {
 	} finally {
 		agent.holdPending = false;
 		setHoldBusy(false);
+	}
+}
+
+/** 요청 중에 서버 알림(위험 발화 자동 차단 등)이 끼어들었으면, 어느 쪽이 나중인지 모르므로 현재 상태를 다시 묻는다 */
+async function serverHold(callId, fallback) {
+	try {
+		const res = await fetch('/api/v1/status');
+		if (!res.ok) return fallback;
+		const call = (await res.json()).calls.find((c) => c.callId === callId);
+		return call ? call.muteHold : fallback;
+	} catch {
+		return fallback;
 	}
 }
 
