@@ -1,6 +1,7 @@
 package com.govtech.voicegateway.domain.audio;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -15,7 +16,7 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 통화별 {@link DelayLine}을 만들고, {@link #TICK_MS}마다 모두 확인해 때가 된 프레임을 내보낸다.
+ * 통화별 {@link DelayLine}과 안내 음성 {@link Playback}을 만들고, {@link #TICK_MS}마다 모두 확인해 때가 된 프레임을 내보낸다.
  * 테스트에서는 시각을 직접 넣고 {@link #drainAll()}을 불러 진행시킨다 (틱 스레드는 스프링이 띄울 때만 시작).
  */
 @Slf4j
@@ -26,6 +27,7 @@ public class DelayLines {
 	static final long TICK_MS = 5;
 
 	private final Set<DelayLine> lines = ConcurrentHashMap.newKeySet();
+	private final Set<Playback> playbacks = ConcurrentHashMap.newKeySet();
 	private final LongSupplier nanoClock;
 	private ScheduledExecutorService ticker;
 
@@ -48,6 +50,13 @@ public class DelayLines {
 		line.close();
 	}
 
+	/** 지금부터 frames를 실시간 속도로 target에 내보낸다. 다 내보내거나 {@link Playback#stop()}하면 끝난다 */
+	public Playback play(List<byte[]> frames, AudioSink target) {
+		Playback playback = new Playback(frames, target, nowNanos());
+		playbacks.add(playback);
+		return playback;
+	}
+
 	public long nowNanos() {
 		return nanoClock.getAsLong();
 	}
@@ -56,6 +65,12 @@ public class DelayLines {
 		long now = nowNanos();
 		for (DelayLine line : lines) {
 			line.drain(now);
+		}
+		for (Playback playback : playbacks) {
+			playback.drain(now);
+			if (!playback.isPlaying()) {
+				playbacks.remove(playback);
+			}
 		}
 	}
 

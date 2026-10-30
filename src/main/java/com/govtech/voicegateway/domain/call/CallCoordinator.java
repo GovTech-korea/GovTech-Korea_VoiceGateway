@@ -16,9 +16,11 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.stereotype.Service;
 
+import com.govtech.voicegateway.domain.audio.Announcement;
 import com.govtech.voicegateway.domain.audio.AudioSink;
 import com.govtech.voicegateway.domain.audio.DelayLine;
 import com.govtech.voicegateway.domain.audio.DelayLines;
+import com.govtech.voicegateway.domain.audio.Playback;
 import com.govtech.voicegateway.domain.call.message.ClientMessage;
 import com.govtech.voicegateway.domain.call.message.ErrorCode;
 import com.govtech.voicegateway.domain.call.message.ProtocolException;
@@ -42,7 +44,7 @@ import lombok.extern.slf4j.Slf4j;
  * 상태 변경은 모두 이 객체의 잠금 안에서 일어난다. 음성 프레임은 초당 50개씩 오가므로
  * 잠금 없이 {@link #audioSinks}만 보고 전달한다. 민원인 음성은 받는 즉시 STT로 보내고({@link SttRelay}),
  * 통화별 {@link DelayLine}을 거쳐 설정한 시간({@code voicegateway.delay-ms})만큼 늦게 상담원에게 간다.
- * 상담원 음성은 바로 민원인에게 간다.
+ * 상담원 음성은 바로 민원인에게 간다. 위험 발화로 차단을 시작하면 민원인에게 안내 음성을 들려주고, 그동안 상담원 음성은 보내지 않는다.
  */
 @Slf4j
 @Service
@@ -56,6 +58,7 @@ public class CallCoordinator {
 	private final DelayLines delayLines;
 	private final SttRelay sttRelay;
 	private final KeywordRiskDetector riskDetector;
+	private final Announcement riskHoldAnnouncement;
 	private final Clock clock;
 
 	private final Map<String, Agent> agentsById = new HashMap<>();
@@ -116,6 +119,7 @@ public class CallCoordinator {
 
 	/**
 	 * 민원인 음성 차단 유지를 켜거나 끈다. 켜 두는 동안 상담원에게는 무음만 간다 (STT에는 원본 그대로).
+	 * 끄면 민원인에게 재생 중인 차단 안내도 멈춰, 상담원이 바로 말할 수 있게 한다.
 	 *
 	 * @return 켤 때 새로 무음 처리한 대기 프레임 수 (끌 때는 0). 통화 중인 callId가 아니면 비어 있다
 	 */
@@ -128,8 +132,18 @@ public class CallCoordinator {
 		if (line.isClosed()) {
 			return OptionalInt.empty(); // 조회와 적용 사이에 통화가 끝났다
 		}
+		if (!hold) {
+			stopAnnouncement(callId);
+		}
 		log.info("음성 차단 유지 {}: {} (대기 프레임 {}개 무음)", hold ? "켜기" : "끄기", callId, muted);
 		return OptionalInt.of(muted);
+	}
+
+	private synchronized void stopAnnouncement(String callId) {
+		Call call = callsById.get(callId);
+		if (call != null && call.announcement != null) {
+			call.announcement.stop();
+		}
 	}
 
 	/** 테스트 콘솔·운영 확인용 현재 상태 */
@@ -225,7 +239,11 @@ public class CallCoordinator {
 			delayLine.offer(frame, delayLines.nowNanos(), receivedAt);
 			stt.accept(frame, receivedAt);
 		});
-		audioSinks.put(agent.connection.id(), call.citizen::sendAudio);
+		audioSinks.put(agent.connection.id(), frame -> {
+			if (!call.isAnnouncing()) { // 안내 음성과 섞이지 않게 그동안 상담원 음성은 버린다
+				call.citizen.sendAudio(frame);
+			}
+		});
 		call.citizen.send(new ServerMessage.Connected(callId, Role.AGENT, 0));
 		agent.connection.send(new ServerMessage.Connected(callId, Role.CITIZEN, properties.delayMs()));
 		log.info("통화 연결: {} ↔ {}", callId, agent.agentId);
@@ -380,6 +398,9 @@ public class CallCoordinator {
 				audioSinks.remove(call.citizen.id());
 				delayLinesByCall.remove(call.callId);
 				delayLines.close(call.delayLine);
+				if (call.announcement != null) {
+					call.announcement.stop();
+				}
 				call.stt.close();
 				if (agent != null) {
 					audioSinks.remove(agent.connection.id());
@@ -535,7 +556,24 @@ public class CallCoordinator {
 					severity, target, keyword, hold.muted()));
 			if (!hold.wasHeld()) {
 				sendIfConnected(call, agentConnection, new ServerMessage.MuteHoldChanged(call.callId, true));
+				announce();
 			}
+		}
+
+		/**
+		 * 민원인에게 차단 안내 음성을 들려준다. 통화 종료·차단 해제와 겹치지 않게 상태 잠금 안에서 시작한다
+		 * (해제는 차단 유지를 먼저 끈 뒤 이 잠금에서 안내를 멈추므로, 그 사이에 오면 여기서 꺼진 것을 보고 시작하지 않는다).
+		 */
+		private void announce() {
+			synchronized (CallCoordinator.this) {
+				DelayLine line = delayLinesByCall.get(call.callId);
+				if (!isConnected(call) || line == null || !line.isHold() || call.isAnnouncing()
+						|| riskHoldAnnouncement.frames().isEmpty()) {
+					return;
+				}
+				call.announcement = delayLines.play(riskHoldAnnouncement.frames(), call.citizen::sendAudio);
+			}
+			log.info("민원인 안내 음성 재생: {} ({}ms)", call.callId, riskHoldAnnouncement.durationMs());
 		}
 	}
 
@@ -549,10 +587,17 @@ public class CallCoordinator {
 		private DelayLine delayLine;
 		private SttRelay.Session stt;
 		private long connectedAtEpochMs;
+		/** 민원인에게 재생 중인 안내 음성. 상담원 음성 전달 스레드가 읽으므로 volatile */
+		private volatile Playback announcement;
 
 		private Call(String callId, ClientConnection citizen) {
 			this.callId = callId;
 			this.citizen = citizen;
+		}
+
+		private boolean isAnnouncing() {
+			Playback playback = announcement;
+			return playback != null && playback.isPlaying();
 		}
 	}
 }
