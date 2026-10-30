@@ -2,7 +2,7 @@
 
 민원인 앱·상담원 앱(Android)과 VOICE_GATEWAY 사이의 연동 규격입니다.
 
-- 버전: v2.3 (2026-10-30)
+- 버전: v2.4 (2026-10-30)
 - 상태: 규격 확정, 게이트웨이 구현 진행 중
 
 ## 1. 전체 구조
@@ -91,6 +91,9 @@
 - 헤더 없이 음성 바이트만 보냅니다 (WAV 헤더 넣지 않음).
 - 게이트웨이가 보내는 상대 음성도 같은 형식입니다.
 - 지연 구간에서 차단된 부분은 **무음(0으로 채운 바이트)**으로 옵니다. 앱은 그대로 재생하면 됩니다.
+- **안내 음성 (민원인 앱):** 위험 발화로 차단 유지가 새로 켜지면 게이트웨이가 "욕설이 감지되어 잠시 통화가 멈춥니다. 잠시만 기다려 주세요."(약 4.7초)를 **상담원 음성과 같은 프레임으로** 20ms마다 보냅니다. 앱은 따로 처리할 것 없이 재생만 하면 됩니다. 안내하는 동안 상담원 음성은 민원인에게 가지 않습니다. 상담원이 차단을 풀거나 통화가 끝나면 안내도 바로 멈춥니다 (상담원 앱은 따로 처리할 것 없음).
+  - 음성 파일: `src/main/resources/announcements/risk-hold.pcm` (PCM16 LE 16kHz mono, 헤더 없음). macOS 기본 한국어 음성(Yuna)으로 만든 시연용이며, 실서비스 전에 이용 조건이 분명한 TTS(네이버 클로바, Google Cloud 등)나 녹음으로 바꿉니다.
+  - 다시 만들기: `say -v Yuna -r 170 -o notice.aiff "<문구>"` → `ffmpeg -i notice.aiff -af "silenceremove=start_periods=1:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_threshold=-50dB,areverse,loudnorm=I=-18:TP=-2" -ac 1 -ar 16000 -f s16le risk-hold.pcm`
 
 ## 5. 텍스트 메시지 (JSON)
 
@@ -276,6 +279,7 @@ override fun onMessage(webSocket: WebSocket, text: String) {
 
 | 버전 | 날짜 | 내용 |
 |---|---|---|
+| v2.4 | 2026-10-30 | 차단 유지가 켜지면 민원인에게 안내 음성을 일반 음성 프레임으로 보냄 (4절, 메시지 변경 없음) |
 | v2.3 | 2026-10-30 | `risk-detected` 직후 차단 유지가 자동으로 켜지고 `mute-hold-changed`(hold=true)가 감. 상담원이 풀 때까지 유지 (메시지 형식 변경 없음) |
 | v2.2 | 2026-10-29 | 상담원 앱에 `transcript`(실시간 자막), `risk-detected`(위험 발화 자동 차단 알림), `mute-hold-changed` 추가. 앱이 모르면 무시해도 통화는 그대로 동작 |
 | v2.1 | 2026-10-26 | 3절에 상담원 전원 거절 시 동작 명시 (메시지 변경 없음) |
