@@ -461,7 +461,7 @@ class CallCoordinatorTest {
 		}
 
 		@Test
-		@DisplayName("자막에 욕설이 있으면 그 발화에서 아직 안 나간 부분을 차단하고 상담원에게 한 번만 알린다")
+		@DisplayName("자막에 욕설이 있으면 아직 안 나간 부분을 차단하고 차단 유지를 켜며, 상담원에게 한 번만 알린다")
 		void abuseInTranscriptMutesAndNotifiesOnce() {
 			long start = clock.millis();
 			coordinator.relayAudio(citizen, frame(1));
@@ -480,25 +480,27 @@ class CallCoordinatorTest {
 					.singleElement()
 					.isEqualTo(new ServerMessage.RiskDetected("call-1", "call-1-0", "당신 개새끼", "ABUSE", "MEDIUM", null, "개새끼", 2));
 			assertThat(agent.messages).filteredOn(ServerMessage.Transcript.class::isInstance).hasSize(2);
+			assertThat(agent.messages).filteredOn(ServerMessage.MuteHoldChanged.class::isInstance)
+					.containsExactly(new ServerMessage.MuteHoldChanged("call-1", true));
 		}
 
 		@Test
-		@DisplayName("발화 시작 시각을 모르면 차단하지 않고 상담원에게 알리기만 한다")
-		void keywordWithoutStartOnlyAlerts() {
+		@DisplayName("발화 시작 시각을 몰라도 차단 유지를 켜서 아직 안 나간 음성을 막는다")
+		void keywordWithoutStartStillHolds() {
 			coordinator.relayAudio(citizen, frame(1));
 
 			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "시발", false, null, clock.millis()));
 			elapse(DELAY_MS);
 
-			assertThat(agent.audio).containsExactly(frame(1));
+			assertThat(agent.audio).containsExactly(new byte[640]);
 			assertThat(agent.messages).filteredOn(ServerMessage.RiskDetected.class::isInstance)
 					.singleElement()
-					.satisfies(m -> assertThat(((ServerMessage.RiskDetected) m).mutedFrames()).isZero());
+					.satisfies(m -> assertThat(((ServerMessage.RiskDetected) m).mutedFrames()).isEqualTo(1));
 		}
 
 		@Test
-		@DisplayName("확정 자막의 위험은 그 발화 끝까지만 차단하고, 뒤에 이어진 정상 발화는 그대로 들린다")
-		void finalRiskIsBounded() {
+		@DisplayName("위험 발화 뒤 이어진 말도 상담원이 차단 유지를 풀 때까지 막고, 풀면 다시 들린다")
+		void riskHoldsUntilAgentReleases() {
 			long start = clock.millis();
 			coordinator.relayAudio(citizen, frame(1));
 			elapse(20);
@@ -507,14 +509,67 @@ class CallCoordinatorTest {
 			elapse(20);
 			coordinator.relayAudio(citizen, frame(3)); // 다음 발화
 
-			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "이 병신아", true, start, end));
+			SttListener listener = stt.listener("call-1");
+			listener.onTranscript(new SttTranscript("call-1-0", "이 병신아", true, start, end));
+			elapse(DELAY_MS);
+			coordinator.relayAudio(citizen, frame(4)); // 한참 뒤에 한 말도 막힌다
+			elapse(DELAY_MS);
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isTrue();
+
+			coordinator.holdMute("call-1", false); // 상담원이 해제
+			listener.onTranscript(new SttTranscript("call-1-0", "이 병신아 진짜", false, start, null)); // 같은 발화가 이어져도
+			coordinator.relayAudio(citizen, frame(5));
 			elapse(DELAY_MS);
 
-			assertThat(agent.audio).containsExactly(new byte[640], new byte[640], frame(3));
+			assertThat(agent.audio).containsExactly(new byte[640], new byte[640], new byte[640], new byte[640], frame(5));
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isFalse();
 		}
 
 		@Test
-		@DisplayName("STT 위험 판단(risk)은 준 구간을 차단하고, hold는 차단 유지를 켜며 상담원에게 알린다")
+		@DisplayName("위험 발화보다 먼저 받은 정상 발화는 지우지 않는다")
+		void keepsSpeechBeforeRisk() {
+			coordinator.relayAudio(citizen, frame(1)); // 앞 발화
+			elapse(20);
+			long start = clock.millis();
+			coordinator.relayAudio(citizen, frame(2));
+
+			stt.listener("call-1").onTranscript(new SttTranscript("call-1-1", "시발", false, start, null));
+			elapse(DELAY_MS);
+
+			assertThat(agent.audio).containsExactly(frame(1), new byte[640]);
+		}
+
+		@Test
+		@DisplayName("STT 위험 판단(risk)만으로 차단 유지가 켜지고, 위험 알림 다음에 상태 알림이 한 번 간다")
+		void sttRiskAloneHolds() {
+			long first = clock.millis();
+			coordinator.relayAudio(citizen, frame(1));
+
+			stt.listener("call-1").onRisk(new SttRisk(first, first, "AGENT", "ABUSE", "MEDIUM", "..."));
+
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isTrue();
+			assertThat(agent.messages).filteredOn(ServerMessage.MuteHoldChanged.class::isInstance).hasSize(1);
+			assertThat(agent.messages).filteredOn(m -> m instanceof ServerMessage.RiskDetected || m instanceof ServerMessage.MuteHoldChanged)
+					.extracting(Object::getClass)
+					.containsExactly(ServerMessage.RiskDetected.class, ServerMessage.MuteHoldChanged.class);
+		}
+
+		@Test
+		@DisplayName("상담원이 해제한 뒤 새 위험 발화가 나오면 차단 유지를 다시 켠다")
+		void newRiskAfterReleaseHoldsAgain() {
+			SttListener listener = stt.listener("call-1");
+			listener.onTranscript(new SttTranscript("call-1-0", "시발", true, clock.millis(), clock.millis()));
+			coordinator.holdMute("call-1", false);
+
+			listener.onTranscript(new SttTranscript("call-1-1", "야 이 새끼야", true, clock.millis(), clock.millis()));
+
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isTrue();
+			assertThat(agent.messages).filteredOn(ServerMessage.MuteHoldChanged.class::isInstance)
+					.containsExactly(new ServerMessage.MuteHoldChanged("call-1", true), new ServerMessage.MuteHoldChanged("call-1", true));
+		}
+
+		@Test
+		@DisplayName("STT 위험 판단(risk)도 그 구간을 지우고 차단 유지를 켠다")
 		void riskAndHoldFromStt() {
 			long first = clock.millis();
 			coordinator.relayAudio(citizen, frame(1));

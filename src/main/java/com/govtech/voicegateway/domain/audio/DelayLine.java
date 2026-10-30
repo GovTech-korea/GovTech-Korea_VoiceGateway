@@ -95,6 +95,21 @@ public final class DelayLine {
 		return mute(Long.MIN_VALUE, Long.MAX_VALUE);
 	}
 
+	/** {@link #startHold} 결과: 이미 차단 유지 중이었는지와 새로 무음 처리한 대기 프레임 수 */
+	public record HoldStart(boolean wasHeld, int muted) {
+	}
+
+	/**
+	 * 위험 발화를 찾았을 때: 그 발화 시작(fromMillis)부터 아직 내보내지 않은 프레임을 지우고 차단 유지를 켠다.
+	 * 그 앞의 정상 발화는 그대로 둔다. 이전 상태 확인과 켜기를 한 잠금에서 해, 상담원이 동시에 풀어도 상태 알림이 빠지지 않게 한다.
+	 */
+	public synchronized HoldStart startHold(long fromMillis) {
+		boolean wasHeld = hold;
+		int muted = mute(fromMillis, Long.MAX_VALUE);
+		hold = true;
+		return new HoldStart(wasHeld, muted);
+	}
+
 	/**
 	 * 차단 유지를 켜거나 끈다. 켜면 아직 내보내지 않은 프레임도 무음으로 바꾼다.
 	 * 끄면 그 뒤에 들어오는 프레임부터 다시 들린다 (유지하는 동안 받아 둔 프레임은 무음 그대로).
