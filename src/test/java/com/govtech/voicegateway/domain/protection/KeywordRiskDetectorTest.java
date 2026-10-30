@@ -22,6 +22,24 @@ class KeywordRiskDetectorTest {
 		assertThat(detector.detect("아 진짜 시발 왜 이래요")).hasValueSatisfying(m -> assertThat(m.keyword()).isEqualTo("시발"));
 	}
 
+	@ParameterizedTest
+	@DisplayName("욕으로 쓰인 '새끼'는 ABUSE (지시어·욕 형용사·부르는 말)")
+	@ValueSource(strings = { "야이새끼", "야이새끼야", "나쁜 새끼야", "야 이 새끼야 빨리 해", "미친새끼", "이 새끼들아", "너 같은 새끼야",
+			"야 이 새꺄", "이 새꺄 뭐라는 거야", "야 새끼야" })
+	void saekki(String text) {
+		assertThat(detector.detect(text)).hasValueSatisfying(m -> {
+			assertThat(m.riskType()).isEqualTo("ABUSE");
+			assertThat(m.keyword()).isEqualTo("새끼");
+		});
+	}
+
+	@Test
+	@DisplayName("'새끼'보다 앞선 규칙(개새끼, 위협)이 먼저 보고된다")
+	void saekkiOrder() {
+		assertThat(detector.detect("이 개새끼야")).hasValueSatisfying(m -> assertThat(m.keyword()).isEqualTo("개새끼"));
+		assertThat(detector.detect("야 이 새끼 죽여버린다")).hasValueSatisfying(m -> assertThat(m.riskType()).isEqualTo("THREAT"));
+	}
+
 	@Test
 	@DisplayName("위협은 욕설보다 먼저 THREAT/HIGH로 보고, 띄어서 인식돼도 찾는다")
 	void threatFirst() {
@@ -45,6 +63,20 @@ class KeywordRiskDetectorTest {
 			"내일 찾아간다고 전해 주세요",
 			"마감이 닥쳐서 급해요",
 			"강아지가 새끼를 낳아서 신고하려고요",
+			"고양이 새끼가 길에 버려져 있어요",
+			"그 새끼 고양이 좀 구조해 주세요",
+			"저 새끼 강아지들 주인을 찾아요",
+			"새끼손가락을 다쳤어요",
+			"새끼줄로 묶여 있었어요",
+			"강아지가 새끼를 낳았는데 그 새끼를 누가 데려갔어요",
+			"유기견이 새끼를 낳았는데 이 새끼들 어떻게 해요",
+			"이 새끼들 분양하려고요",
+			"이 새끼가 아파요",
+			"저 새끼 새가 둥지에서 떨어졌어요",
+			"그 새끼  고양이",
+			"그 새끼",
+			"새끼 야",
+			"새끼 야생 고양이를 봤어요",
 			"개 새로 입양했는데 등록은 어떻게 해요",
 			"직장 내 성희롱 신고는 어디로 하나요" })
 	void normal(String text) {
