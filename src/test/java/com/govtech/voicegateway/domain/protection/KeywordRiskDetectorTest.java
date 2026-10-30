@@ -2,6 +2,8 @@ package com.govtech.voicegateway.domain.protection;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
+
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.DisplayName;
@@ -81,6 +83,31 @@ class KeywordRiskDetectorTest {
 			"직장 내 성희롱 신고는 어디로 하나요" })
 	void normal(String text) {
 		assertThat(detector.detect(text)).isEmpty();
+	}
+
+	@Test
+	@DisplayName("욕설 목록(abuse-words.txt)을 읽어 모두 찾는다 (파일 형식·로딩 확인)")
+	void everyListedWord() {
+		List<String> words = List.of(KeywordRiskDetector.loadWords(KeywordRiskDetector.ABUSE_WORDS));
+
+		assertThat(words).hasSizeGreaterThan(1000);
+		assertThat(words).allSatisfy(word -> assertThat(detector.detect("아 진짜 " + word + " 왜 이래요")).as(word).isPresent());
+	}
+
+	@Test
+	@DisplayName("정상 민원 함정 문장(normal-sentences.txt)은 하나도 찾지 않는다")
+	void noNormalSentence() {
+		List<String> sentences = List.of(KeywordRiskDetector.loadWords("protection/normal-sentences.txt"));
+
+		assertThat(sentences).isNotEmpty();
+		assertThat(sentences).allSatisfy(sentence -> assertThat(detector.detect(sentence)).as(sentence).isEmpty());
+	}
+
+	@ParameterizedTest
+	@DisplayName("실통화 STT 전사에 나온 욕을 찾는다")
+	@ValueSource(strings = { "시발새끼", "개색기", "미친 놈", "너는 미친 놈이야", "씨발 새끼", "이 시발샠", "씨발롬아", "개쌔끼야" })
+	void realTranscripts(String text) {
+		assertThat(detector.detect(text)).isPresent();
 	}
 
 	@Test

@@ -1,11 +1,16 @@
 package com.govtech.voicegateway.domain.protection;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
 /**
@@ -28,11 +33,17 @@ public class KeywordRiskDetector {
 	public record Match(String keyword, String riskType, String severity) {
 	}
 
+	/** pattern이 없으면 keyword 글자가 들어 있는지만 본다 */
 	private record Rule(String keyword, Pattern pattern, String riskType, String severity, boolean ignoreSpaces) {
+
+		boolean matches(String text) {
+			return pattern == null ? text.contains(keyword) : pattern.matcher(text).find();
+		}
 	}
 
 	/** 욕설 단어를 품었지만 정상인 말 */
-	private static final List<String> SAFE_WORDS = List.of("시발점", "시발역", "시발택시", "질병신", "병신청", "신분증", "등신대");
+	private static final List<String> SAFE_WORDS = List.of("시발점", "시발역", "시발택시", "질병신", "병신청", "신분증", "등신대",
+			"감염병", "전염병");
 
 	/**
 	 * 욕으로만 쓰이는 "새끼": 부르는 말(야 이 새끼, 새끼야, 새끼들아, 새꺄)과 욕 형용사(나쁜·미친 새끼).
@@ -46,20 +57,34 @@ public class KeywordRiskDetector {
 					+ "|새끼(?:야|들아)(?![가-힣]))"
 					+ "(?!\\s*(?:고양이|강아지|돼지|오리|손가락|발가락|줄))");
 
-	// 위협이 욕설보다 위험하므로 먼저 본다
-	private static final List<Rule> RULES = Stream.of(
+	// 위협이 욕설보다 위험하므로 먼저 본다. 욕설 목록 파일은 위 규칙이 놓친 것만 잡는다
+	private final List<Rule> rules = Stream.of(
 			rules("THREAT", "HIGH", true, "죽여버", "죽여줄", "죽인다", "죽일거", "죽일줄", "가만두지않", "가만안둬", "가만안둘", "불질러",
 					"칼로찔", "찔러버"),
 			rules("ABUSE", "MEDIUM", false, "씨발", "시발", "씨팔", "시팔", "씨바", "쉬발", "개새끼", "개색기", "병신", "븅신", "좆", "존나",
 					"지랄", "미친놈", "미친년", "또라이", "썅", "엿먹어"),
-			List.of(new Rule("새끼", SAEKKI, "ABUSE", "MEDIUM", false)))
+			List.of(new Rule("새끼", SAEKKI, "ABUSE", "MEDIUM", false)),
+			rules("ABUSE", "MEDIUM", false, loadWords(ABUSE_WORDS)))
 			.flatMap(List::stream)
 			.toList();
 
+	/** 변형 철자·띄어쓰기를 조합한 욕설 목록 (한 줄에 하나, #은 주석) */
+	static final String ABUSE_WORDS = "protection/abuse-words.txt";
+
+	static String[] loadWords(String path) {
+		try (InputStream in = new ClassPathResource(path).getInputStream()) {
+			return new String(in.readAllBytes(), StandardCharsets.UTF_8).lines()
+					.map(String::strip)
+					.filter(line -> !line.isEmpty() && !line.startsWith("#"))
+					.distinct()
+					.toArray(String[]::new);
+		} catch (IOException e) {
+			throw new UncheckedIOException("욕설 목록을 읽을 수 없습니다: " + path, e);
+		}
+	}
+
 	private static List<Rule> rules(String riskType, String severity, boolean ignoreSpaces, String... keywords) {
-		return Arrays.stream(keywords)
-				.map(k -> new Rule(k, Pattern.compile(Pattern.quote(k)), riskType, severity, ignoreSpaces))
-				.toList();
+		return Arrays.stream(keywords).map(k -> new Rule(k, null, riskType, severity, ignoreSpaces)).toList();
 	}
 
 	public Optional<Match> detect(String text) {
@@ -72,8 +97,8 @@ public class KeywordRiskDetector {
 		}
 		String compact = cleaned.replaceAll("\\s+", "");
 		String spaced = cleaned;
-		return RULES.stream()
-				.filter(rule -> rule.pattern().matcher(rule.ignoreSpaces() ? compact : spaced).find())
+		return rules.stream()
+				.filter(rule -> rule.matches(rule.ignoreSpaces() ? compact : spaced))
 				.findFirst()
 				.map(rule -> new Match(rule.keyword(), rule.riskType(), rule.severity()));
 	}
