@@ -44,5 +44,9 @@ CLAUDE.local.md
 ### 실행 중 생기는 파일 (로그, STT 음원 기록) ###
 runtime/
 
+### 서버 접속 인증키 (어느 폴더에 두든 커밋하지 않는다) ###
+*.pem
+*.key
+
 ### macOS ###
 .DS_Store
