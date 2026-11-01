@@ -33,8 +33,9 @@ public class KeywordRiskDetector {
 	public record Match(String keyword, String riskType, String severity) {
 	}
 
-	/** pattern이 없으면 keyword 글자가 들어 있는지만 본다 */
-	private record Rule(String keyword, Pattern pattern, String riskType, String severity, boolean ignoreSpaces) {
+	/** pattern이 없으면 keyword 글자가 들어 있는지만 본다. finalOnly면 발화가 끝난 최종 결과에서만 본다 */
+	private record Rule(String keyword, Pattern pattern, String riskType, String severity, boolean ignoreSpaces,
+			boolean finalOnly) {
 
 		boolean matches(String text) {
 			return pattern == null ? text.contains(keyword) : pattern.matcher(text).find();
@@ -47,15 +48,29 @@ public class KeywordRiskDetector {
 
 	/**
 	 * 욕으로만 쓰이는 "새끼": 부르는 말(야 이 새끼, 새끼야, 새끼들아, 새꺄)과 욕 형용사(나쁜·미친 새끼).
-	 * "이/그 새끼"는 동물 민원("이 새끼들 분양하려고요")에도 나오고 중간 결과가 "그 새끼"에서 잘리기도 해서 보지 않는다.
+	 * "그 새끼"는 중간 결과가 거기서 잘리기도 해서 보지 않는다 ("이 새끼"는 {@link #I_SAEKKI}).
+	 * "빛은"은 STT가 "미친"을 잘못 적은 형태라, 햇빛은·불빛은과 헷갈리지 않게 앞 글자가 없을 때만 본다.
 	 */
 	private static final String SAEKKI_FORMS = "(?:새끼|새꺄|색기|새키)";
 	private static final Pattern SAEKKI = Pattern.compile(
 			"(?:(?<![가-힣])야\\s?이?\\s?" + SAEKKI_FORMS
-					+ "|(?:나쁜|미친|썩을|망할|못된|더러운|빌어먹을)\\s?" + SAEKKI_FORMS
+					+ "|(?:나쁜|미친|(?<![가-힣])빛은|썩을|망할|못된|더러운|빌어먹을)\\s?" + SAEKKI_FORMS
 					+ "|새꺄"
 					+ "|새끼(?:야|들아)(?![가-힣]))"
 					+ "(?!\\s*(?:고양이|강아지|돼지|오리|손가락|발가락|줄))");
+
+	/**
+	 * 발화 전체가 "(야) 이 새끼"일 때. 중간 결과는 "이 새끼(들 분양하려고요)"처럼 아무 데서나 잘리므로 최종 결과에서만 보고,
+	 * "데려온 애는 이 새끼"처럼 앞말이 있으면 가리키는 말일 수 있어 보지 않는다.
+	 */
+	private static final Pattern I_SAEKKI = Pattern.compile("^[\\s.?!,]*(?:야\\s?)?이\\s?" + SAEKKI_FORMS + "[\\s.?!,]*$");
+
+	/**
+	 * 부르는 말 "(야) 이 자식(들)아"와 STT가 "야 이 자식아"를 잘못 적은 "야이자씨가".
+	 * "자식이"(우리 자식이 다쳤어요)는 보지 않고, "자씨가"는 "이자씨가"(이자) 와 헷갈리지 않게 "야"나 띄어쓰기가 있을 때만 본다.
+	 */
+	private static final Pattern JASIK = Pattern.compile(
+			"(?<![가-힣])(?:(?:야\\s?)?이\\s?자식(?:들)?아|야\\s?이\\s?자씨가|이\\s자씨가)(?![가-힣])");
 
 	// 위협이 욕설보다 위험하므로 먼저 본다. 욕설 목록 파일은 위 규칙이 놓친 것만 잡는다
 	private final List<Rule> rules = Stream.of(
@@ -63,7 +78,9 @@ public class KeywordRiskDetector {
 					"칼로찔", "찔러버"),
 			rules("ABUSE", "MEDIUM", false, "씨발", "시발", "씨팔", "시팔", "씨바", "쉬발", "개새끼", "개색기", "병신", "븅신", "좆", "존나",
 					"지랄", "미친놈", "미친년", "또라이", "썅", "엿먹어"),
-			List.of(new Rule("새끼", SAEKKI, "ABUSE", "MEDIUM", false)),
+			List.of(new Rule("새끼", SAEKKI, "ABUSE", "MEDIUM", false, false),
+					new Rule("새끼", I_SAEKKI, "ABUSE", "MEDIUM", false, true),
+					new Rule("자식", JASIK, "ABUSE", "MEDIUM", false, false)),
 			rules("ABUSE", "MEDIUM", false, loadWords(ABUSE_WORDS)))
 			.flatMap(List::stream)
 			.toList();
@@ -84,10 +101,16 @@ public class KeywordRiskDetector {
 	}
 
 	private static List<Rule> rules(String riskType, String severity, boolean ignoreSpaces, String... keywords) {
-		return Arrays.stream(keywords).map(k -> new Rule(k, null, riskType, severity, ignoreSpaces)).toList();
+		return Arrays.stream(keywords).map(k -> new Rule(k, null, riskType, severity, ignoreSpaces, false)).toList();
 	}
 
+	/** 발화가 끝난 최종 결과(또는 완성된 문장)에서 찾는다 */
 	public Optional<Match> detect(String text) {
+		return detect(text, true);
+	}
+
+	/** isFinal이 false인 중간 결과에서는 잘린 위치 때문에 틀리기 쉬운 규칙을 건너뛴다 */
+	public Optional<Match> detect(String text, boolean isFinal) {
 		if (text == null || text.isBlank()) {
 			return Optional.empty();
 		}
@@ -98,6 +121,7 @@ public class KeywordRiskDetector {
 		String compact = cleaned.replaceAll("\\s+", "");
 		String spaced = cleaned;
 		return rules.stream()
+				.filter(rule -> isFinal || !rule.finalOnly())
 				.filter(rule -> rule.matches(rule.ignoreSpaces() ? compact : spaced))
 				.findFirst()
 				.map(rule -> new Match(rule.keyword(), rule.riskType(), rule.severity()));
