@@ -512,7 +512,7 @@ public class CallCoordinator {
 			}
 			sendIfConnected(call, agentConnection, new ServerMessage.Transcript(call.callId, transcript.utteranceId(),
 					transcript.text(), transcript.isFinal()));
-			riskDetector.detect(transcript.text()).ifPresent(match -> protect(transcript.utteranceId(), transcript.text(),
+			riskDetector.detect(transcript.text(), transcript.isFinal()).ifPresent(match -> protect(transcript.utteranceId(), transcript.text(),
 					transcript.fromEpochMs(), match.riskType(), match.severity(), null, match.keyword()));
 		}
 
