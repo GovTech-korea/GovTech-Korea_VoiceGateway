@@ -71,7 +71,6 @@ STT로 보낸 음성을 파일로 남기려면 기록 폴더를 지정해 실행
 | 경로 | 내용 |
 |---|---|
 | `runtime/logs/server.log` | 게이트웨이 로그 (상담원 등록, 통화 연결·종료, 차단, STT 스트림, 오류) |
-| `runtime/logs/tunnel.log` | 터널 로그 (공개 주소, 연결·재연결) |
 | `runtime/logs/*.pid` | 백그라운드로 켠 프로세스 번호 (끌 때 사용) |
 | `runtime/stt-dump/<callId>-<시작 ms>.pcm` | STT로 보낸 음성 (raw PCM16LE) |
 
@@ -96,7 +95,7 @@ grep -E "통화|차단|ERROR|WARN" runtime/logs/server.log           # 중요한
 4. 민원인 목소리는 상담원에게 약 0.8초 늦게 들립니다. 상담원이 `위험 구간 차단`을 누르면 아직 들리지 않은 부분부터 **다시 누를 때까지** 계속 무음이 됩니다 (통합 콘솔에는 한 번만 지우는 버튼도 있음)
 
 - 한 기기에서 두 역할을 같이 쓰거나 스피커로 들을 때는 **이어폰**을 씁니다. 스피커 소리가 마이크로 다시 들어갑니다.
-- 마이크는 `localhost`나 HTTPS에서만 쓸 수 있습니다. 다른 기기에서 IP로 접속하면 테스트 톤·오디오 파일을 쓰거나 아래 터널을 씁니다.
+- 마이크는 `localhost`나 HTTPS에서만 쓸 수 있습니다. 다른 기기에서 IP로 접속하면 테스트 톤·오디오 파일을 씁니다. 외부 시연은 HTTPS가 설정된 별도 서버에서 합니다.
 - `dump-dir`을 지정했으면 통합 콘솔의 "STT로 보낸 음성 듣기"에서 STT가 받은 음성을 그대로 들을 수 있습니다.
 
 ### STT 서버 연결 (실시간 자막)
@@ -111,17 +110,7 @@ STT 서버가 연결돼 있으면 상담원 화면 통화 중에 **민원인 말
 
 연동 형식은 [docs/stt-integration.md](docs/stt-integration.md) 6장을 봅니다.
 
-### 팀원이 원격으로 들어와 시험하기 (임시 공개 주소)
-
-```bash
-brew install cloudflared
-cloudflared tunnel --url http://localhost:8080
-```
-
-출력된 `https://xxxx.trycloudflare.com/test` 를 팀원에게 보내면 됩니다. HTTPS라서 팀원 기기에서도 마이크를 쓸 수 있습니다.
-
-- 터널을 다시 켜면 주소가 바뀝니다 (게이트웨이만 재시작하면 그대로). 와이파이가 잠깐 끊기는 정도는 터널이 스스로 다시 연결합니다
-- 시험하는 동안 Mac이 잠들지 않게 하고, 끝나면 터널을 끕니다. 인증이 없으니 주소는 팀원에게만 보냅니다
+### 백그라운드로 켜 두기
 
 터미널을 닫아도 계속 켜 두려면 백그라운드로 실행합니다 (로그는 `runtime/logs/`).
 
@@ -129,12 +118,7 @@ cloudflared tunnel --url http://localhost:8080
 mkdir -p runtime/logs
 nohup ./gradlew bootRun --args='--voicegateway.stt.dump-dir=runtime/stt-dump' > runtime/logs/server.log 2>&1 &
 echo $! > runtime/logs/server.pid
-nohup cloudflared tunnel --no-autoupdate --url http://localhost:8080 > runtime/logs/tunnel.log 2>&1 &
-echo $! > runtime/logs/tunnel.pid
-nohup caffeinate -dimsu -w $(cat runtime/logs/tunnel.pid) > /dev/null 2>&1 &   # 터널이 켜져 있는 동안 잠자기 방지
-
-grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' runtime/logs/tunnel.log | head -1   # 공개 주소 확인
-kill $(cat runtime/logs/server.pid runtime/logs/tunnel.pid)                         # 모두 끄기
+kill $(cat runtime/logs/server.pid)   # 끄기
 ```
 
 ## 빌드와 테스트
