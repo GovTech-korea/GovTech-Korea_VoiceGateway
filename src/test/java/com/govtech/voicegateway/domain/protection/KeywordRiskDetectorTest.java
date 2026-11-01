@@ -105,9 +105,30 @@ class KeywordRiskDetectorTest {
 
 	@ParameterizedTest
 	@DisplayName("실통화 STT 전사에 나온 욕을 찾는다")
-	@ValueSource(strings = { "시발새끼", "개색기", "미친 놈", "너는 미친 놈이야", "씨발 새끼", "이 시발샠", "씨발롬아", "개쌔끼야" })
+	@ValueSource(strings = { "시발새끼", "개색기", "미친 놈", "너는 미친 놈이야", "씨발 새끼", "이 시발샠", "씨발롬아", "개쌔끼야",
+			"야이자씨가", "이 자씨가", "이 새끼", "이 새끼.", "이 발새끼야 이 새끼", "빛은 새끼", "빛은새끼" })
 	void realTranscripts(String text) {
 		assertThat(detector.detect(text)).isPresent();
+	}
+
+	@ParameterizedTest
+	@DisplayName("부르는 말 '이 자식아'와 STT가 잘못 적은 '야이자씨가'는 ABUSE")
+	@ValueSource(strings = { "야 이 자식아", "이 자식아", "야이자식아", "이 자식들아", "야이자씨가", "야 이 자씨가", "이 자씨가" })
+	void jasik(String text) {
+		assertThat(detector.detect(text)).hasValueSatisfying(m -> assertThat(m.keyword()).isEqualTo("자식"));
+	}
+
+	@Test
+	@DisplayName("발화 전체가 '이 새끼'면 최종 결과에서만 찾는다 (중간 결과는 '이 새끼(들 분양…)'에서 잘린다)")
+	void iSaekkiOnlyWhenFinal() {
+		assertThat(detector.detect("이 새끼", true)).hasValueSatisfying(m -> assertThat(m.keyword()).isEqualTo("새끼"));
+		assertThat(detector.detect("이 새끼", false)).isEmpty();
+		for (String sentence : List.of("이 새끼들 분양하려고요", "이 새끼 고양이 좀 데려가 주세요", "이 새끼손가락을 다쳤어요")) {
+			for (int end = 1; end <= sentence.length(); end++) {
+				String partial = sentence.substring(0, end);
+				assertThat(detector.detect(partial, false)).as(partial).isEmpty();
+			}
+		}
 	}
 
 	@Test
