@@ -118,12 +118,32 @@ public class CallCoordinator {
 	}
 
 	/**
+	 * 상담원이 REST로 민원인 음성 차단 유지를 켜거나 끈다. 바뀐 상태는 상담원 앱에 mute-hold-changed로도 알린다.
+	 *
+	 * @return 켤 때 새로 무음 처리한 대기 프레임 수 (끌 때는 0). 통화 중인 callId가 아니면 비어 있다
+	 */
+	public OptionalInt holdMute(String callId, boolean hold) {
+		OptionalInt muted = setHold(callId, hold);
+		if (muted.isPresent()) {
+			notifyHold(callId, hold);
+		}
+		return muted;
+	}
+
+	private synchronized void notifyHold(String callId, boolean hold) {
+		Call call = callsById.get(callId);
+		if (call != null && call.state == CallState.CONNECTED && call.agent != null) {
+			call.agent.connection.send(new ServerMessage.MuteHoldChanged(callId, hold));
+		}
+	}
+
+	/**
 	 * 민원인 음성 차단 유지를 켜거나 끈다. 켜 두는 동안 상담원에게는 무음만 간다 (STT에는 원본 그대로).
 	 * 끄면 민원인에게 재생 중인 차단 안내도 멈춰, 상담원이 바로 말할 수 있게 한다.
 	 *
 	 * @return 켤 때 새로 무음 처리한 대기 프레임 수 (끌 때는 0). 통화 중인 callId가 아니면 비어 있다
 	 */
-	public OptionalInt holdMute(String callId, boolean hold) {
+	private OptionalInt setHold(String callId, boolean hold) {
 		DelayLine line = delayLinesByCall.get(callId);
 		if (line == null) {
 			return OptionalInt.empty();
@@ -513,20 +533,20 @@ public class CallCoordinator {
 			sendIfConnected(call, agentConnection, new ServerMessage.Transcript(call.callId, transcript.utteranceId(),
 					transcript.text(), transcript.isFinal()));
 			riskDetector.detect(transcript.text(), transcript.isFinal()).ifPresent(match -> protect(transcript.utteranceId(), transcript.text(),
-					transcript.fromEpochMs(), match.riskType(), match.severity(), null, match.keyword()));
+					transcript.fromEpochMs(), match.riskType(), match.severity(), match.keyword()));
 		}
 
 		@Override
 		public void onRisk(SttRisk risk) {
 			if (isConnected(call)) {
 				protect("risk-" + risk.fromEpochMs() + "-" + risk.toEpochMs(), risk.text(), risk.fromEpochMs(),
-						risk.riskType(), risk.severity(), risk.target(), null);
+						risk.riskType(), risk.severity(), null);
 			}
 		}
 
 		@Override
 		public void onHold(boolean on) {
-			if (isConnected(call) && holdMute(call.callId, on).isPresent()) {
+			if (isConnected(call) && setHold(call.callId, on).isPresent()) {
 				sendIfConnected(call, agentConnection, new ServerMessage.MuteHoldChanged(call.callId, on));
 			}
 		}
@@ -536,8 +556,7 @@ public class CallCoordinator {
 		 * 욕한 민원인은 다음 말도 폭언일 가능성이 높아, 상담원이 직접 풀 때까지 민원인 음성을 계속 막는다.
 		 * 같은 발화의 결과가 더 와도 다시 지우거나 켜지 않는다 (상담원이 푼 뒤 바로 다시 막히지 않게).
 		 */
-		private void protect(String key, String text, Long fromEpochMs, String riskType, String severity, String target,
-				String keyword) {
+		private void protect(String key, String text, Long fromEpochMs, String riskType, String severity, String keyword) {
 			if (!notified.add(key)) {
 				return;
 			}
@@ -553,7 +572,7 @@ public class CallCoordinator {
 			log.info("위험 발화 감지: {} {} {} '{}' (무음 {}프레임, 차단 유지)", call.callId, riskType, severity, keyword,
 					hold.muted());
 			sendIfConnected(call, agentConnection, new ServerMessage.RiskDetected(call.callId, key, text, riskType,
-					severity, target, keyword, hold.muted()));
+					severity, keyword, hold.muted()));
 			if (!hold.wasHeld()) {
 				sendIfConnected(call, agentConnection, new ServerMessage.MuteHoldChanged(call.callId, true));
 				announce();
