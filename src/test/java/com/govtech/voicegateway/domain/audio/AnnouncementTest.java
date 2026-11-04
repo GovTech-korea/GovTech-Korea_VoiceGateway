@@ -32,4 +32,14 @@ class AnnouncementTest {
 
 		assertThat(announcement.durationMs()).isBetween(2_000L, 10_000L);
 	}
+
+	@Test
+	@DisplayName("정책 안내 멘트 3종(폭언 안내, 폭언 후 안내, 세션 종료)을 읽을 수 있다")
+	void bundledPolicyAnnouncements() {
+		for (String name : new String[] {"abuse-notice", "after-notice", "session-end"}) {
+			Announcement announcement = Announcement.load(new ClassPathResource("announcements/" + name + ".pcm"));
+
+			assertThat(announcement.durationMs()).as(name).isBetween(1_000L, 10_000L);
+		}
+	}
 }

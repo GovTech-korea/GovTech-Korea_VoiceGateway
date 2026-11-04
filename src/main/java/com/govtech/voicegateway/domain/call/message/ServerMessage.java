@@ -3,6 +3,7 @@ package com.govtech.voicegateway.domain.call.message;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.govtech.voicegateway.domain.call.AgentState;
 import com.govtech.voicegateway.domain.call.Role;
+import com.govtech.voicegateway.domain.protection.CallProtection;
 
 /**
  * 게이트웨이 → 앱 텍스트 메시지 (docs/app-integration.md 5절). JSON의 "type" 값은 {@link #type()}이다.
@@ -94,6 +95,32 @@ public sealed interface ServerMessage {
 		}
 	}
 
+	/** 상담원에게: 보호 정책 카운터 (통화 연결 시 한 번, 값이 바뀔 때마다) */
+	record ProtectionState(String callId, int abuseCount, int abuseLimit, int afterNoticeCount, int afterNoticeLimit,
+			int agitationSeconds, int agitationLimitSeconds) implements ServerMessage {
+		@Override
+		public String type() {
+			return "protection-state";
+		}
+	}
+
+	/** 상담원에게: 민원인 발화 하나의 감정 판단 */
+	record Emotion(String callId, int score, boolean agitated) implements ServerMessage {
+		@Override
+		public String type() {
+			return "emotion";
+		}
+	}
+
+	/** 상담원에게: '음소거 구간 전사' 목록의 한 줄. 같은 eventId면 그 줄을 덮어쓴다 */
+	record ProtectionEvent(String callId, String eventId, CallProtection.EventKind kind, long startMs, long endMs,
+			String text, String keyword) implements ServerMessage {
+		@Override
+		public String type() {
+			return "protection-event";
+		}
+	}
+
 	record Error(ErrorCode code, String message) implements ServerMessage {
 		@Override
 		public String type() {
@@ -115,6 +142,8 @@ public sealed interface ServerMessage {
 	enum CallEndReason {
 		HANGUP_CITIZEN,
 		HANGUP_AGENT,
-		DISCONNECTED
+		DISCONNECTED,
+		/** 폭언이 정책 횟수에 닿아 '세션 종료' 멘트 뒤 게이트웨이가 끊음 */
+		POLICY_TERMINATED
 	}
 }

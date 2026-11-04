@@ -37,6 +37,7 @@ class CallWebSocketIntegrationTest {
 
 		agent.sendText("{\"type\":\"accept\",\"callId\":\"it-call\"}");
 		assertThat(agent.nextText()).contains("\"type\":\"connected\"", "\"peerRole\":\"CITIZEN\"");
+		assertThat(agent.nextText()).contains("\"type\":\"protection-state\"", "\"abuseCount\":0", "\"abuseLimit\":5");
 		assertThat(citizen.nextText()).contains("\"type\":\"connected\"", "\"peerRole\":\"AGENT\"");
 
 		byte[] citizenVoice = filled(7);

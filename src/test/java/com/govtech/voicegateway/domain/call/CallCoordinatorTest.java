@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import com.govtech.voicegateway.domain.audio.Announcement;
+import com.govtech.voicegateway.domain.audio.Announcements;
 import com.govtech.voicegateway.domain.audio.DelayLines;
 import com.govtech.voicegateway.domain.call.message.ClientMessage;
 import com.govtech.voicegateway.domain.call.message.ErrorCode;
@@ -21,6 +22,11 @@ import com.govtech.voicegateway.domain.call.message.ServerMessage.CallEndReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.RingCancelReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.StatusReason;
 import com.govtech.voicegateway.domain.protection.KeywordRiskDetector;
+import com.govtech.voicegateway.domain.emotion.EmotionResult;
+import com.govtech.voicegateway.domain.protection.CallProtection;
+import com.govtech.voicegateway.domain.protection.ProtectionPolicy;
+import com.govtech.voicegateway.domain.protection.ProtectionPolicy.AfterNotice;
+import com.govtech.voicegateway.domain.protection.ProtectionPolicyStore;
 import com.govtech.voicegateway.domain.stt.FakeSttGateway;
 import com.govtech.voicegateway.domain.stt.SttAudioFormat;
 import com.govtech.voicegateway.domain.stt.SttChunk;
@@ -42,6 +48,8 @@ class CallCoordinatorTest {
 	private DelayLines delayLines;
 	private FakeSttGateway stt;
 	private CallCoordinator coordinator;
+	private ProtectionPolicyStore policyStore;
+	private FakeEmotionAnalyzer emotion;
 
 	@BeforeEach
 	void setUp() {
@@ -50,8 +58,13 @@ class CallCoordinatorTest {
 		delayLines = new DelayLines(clock::nanos);
 		stt = new FakeSttGateway();
 		SttRelay sttRelay = new SttRelay(new SttProperties(SttAudioFormat.PCM16_16K, null, null), java.util.List.of(stt));
+		policyStore = new ProtectionPolicyStore();
+		emotion = new FakeEmotionAnalyzer();
+		Announcements announcements = new Announcements(new Announcement(List.of(frame(8), frame(9))),
+				new Announcement(List.of(frame(11))), new Announcement(List.of(frame(12))),
+				new Announcement(List.of(frame(13), frame(13))));
 		coordinator = new CallCoordinator(new VoiceGatewayProperties(DELAY_MS, RING_TIMEOUT_MS), ringTimer, delayLines,
-				sttRelay, new KeywordRiskDetector(), new Announcement(List.of(frame(8), frame(9))), clock);
+				sttRelay, new KeywordRiskDetector(), announcements, policyStore, emotion, clock);
 	}
 
 	/** 시간을 진행시키고 지연 버퍼에서 때가 된 음성을 내보낸다. */
@@ -186,14 +199,16 @@ class CallCoordinatorTest {
 	class Ring {
 
 		@Test
-		@DisplayName("받으면 양쪽에 connected가 가고, 상담원 쪽 delayMs는 설정값이다")
+		@DisplayName("받으면 양쪽에 connected가 가고, 상담원 쪽 delayMs는 설정값이며 이어서 0으로 시작하는 카운터가 간다")
 		void accept() {
 			FakeConnection agent = agent("agent-01");
 			FakeConnection citizen = citizen("call-1");
+			agent.clear();
 
 			coordinator.handle(agent, new ClientMessage.Accept("call-1"));
 
-			assertThat(agent.last()).isEqualTo(new ServerMessage.Connected("call-1", Role.CITIZEN, DELAY_MS));
+			assertThat(agent.messages).containsExactly(new ServerMessage.Connected("call-1", Role.CITIZEN, DELAY_MS),
+					new ServerMessage.ProtectionState("call-1", 0, 5, 0, 2, 0, 5));
 			assertThat(citizen.last()).isEqualTo(new ServerMessage.Connected("call-1", Role.AGENT, 0));
 			assertThat(ringTimer.activeCount()).isZero();
 		}
@@ -793,5 +808,227 @@ class CallCoordinatorTest {
 		assertThatThrownBy(() -> coordinator.handle(citizen, new ClientMessage.Register("agent-x")))
 				.isInstanceOfSatisfying(ProtocolException.class,
 						e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_STATE));
+	}
+
+	@Nested
+	@DisplayName("보호 정책")
+	class Protection {
+
+		private FakeConnection agent;
+		private FakeConnection citizen;
+		private int utterance;
+
+		@BeforeEach
+		void connect() {
+			policyStore.save(new ProtectionPolicy(2, AfterNotice.COUNT, 2, 1));
+			agent = agent("agent-01");
+			citizen = citizen("call-1");
+			coordinator.handle(agent, new ClientMessage.Accept("call-1"));
+			agent.clear();
+			citizen.clear();
+		}
+
+		/** 욕설 확정 자막 하나 (발화마다 다른 utteranceId) */
+		private void abuse() {
+			long now = clock.millis();
+			stt.listener("call-1").onTranscript(new SttTranscript("call-1-" + utterance++, "개새끼", true, now, now));
+			clock.advance(Duration.ofMillis(1)); // 다음 발화는 다른 시각 (안내 음성 프레임은 아직 나가지 않는다)
+		}
+
+		/** frames개 프레임(20ms씩)을 말하고 확정 자막을 보낸다 */
+		private void speak(int frames, String text) {
+			long from = clock.millis();
+			for (int i = 0; i < frames; i++) {
+				coordinator.relayAudio(citizen, frame(1));
+				elapse(20);
+			}
+			stt.listener("call-1").onTranscript(new SttTranscript("call-1-" + utterance++, text, true, from, clock.millis() - 20));
+		}
+
+		@Test
+		@DisplayName("폭언이 감지되면 상담원에게 보호 기록(ABUSE)과 바뀐 카운터를 보낸다")
+		void abuseSendsEventAndState() {
+			elapse(30_000);
+			abuse();
+
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).containsExactly(new ServerMessage.ProtectionEvent(
+					"call-1", "call-1-e1", CallProtection.EventKind.ABUSE, 30_000, 30_000, "개새끼", "개새끼"));
+			assertThat(agent.all(ServerMessage.ProtectionState.class)).containsExactly(
+					new ServerMessage.ProtectionState("call-1", 1, 2, 0, 2, 0, 1));
+		}
+
+		@Test
+		@DisplayName("허용 횟수째 폭언에는 차단 안내 대신 폭언 안내 멘트를, 안내 뒤에는 폭언 후 안내 멘트를 튼다")
+		void playsPolicyAnnouncements() {
+			abuse();
+			elapse(0);
+			elapse(20);
+			assertThat(citizen.audio).containsExactly(frame(8), frame(9)); // 첫 폭언: 차단 안내
+			citizen.audio.clear();
+
+			abuse();
+			elapse(0);
+			assertThat(citizen.audio).containsExactly(frame(11)); // 폭언 안내
+			citizen.audio.clear();
+
+			abuse();
+			elapse(0);
+			assertThat(citizen.audio).containsExactly(frame(12)); // 폭언 후 안내
+		}
+
+		@Test
+		@DisplayName("안내 후 폭언이 허용 횟수에 닿으면 세션 종료 멘트를 끝까지 튼 뒤 양쪽에 call-ended(POLICY_TERMINATED)")
+		void terminatesAfterSessionEnd() {
+			abuse();
+			abuse();
+			abuse();
+			citizen.audio.clear();
+
+			abuse();
+			coordinator.holdMute("call-1", false); // 상담원이 풀어도 세션 종료 멘트는 멈추지 않는다
+			elapse(0);
+			elapse(20);
+			assertThat(citizen.audio).containsExactly(frame(13), frame(13));
+			assertThat(ringTimer.lastDelay()).isEqualTo(Duration.ofMillis(40 + CallCoordinator.TERMINATE_MARGIN_MS));
+			assertThat(citizen.messages).doesNotHaveAnyElementsOfTypes(ServerMessage.CallEnded.class);
+
+			ringTimer.fireAll();
+
+			assertThat(citizen.last()).isEqualTo(new ServerMessage.CallEnded("call-1", CallEndReason.POLICY_TERMINATED));
+			assertThat(citizen.closed).isTrue();
+			assertThat(agent.all(ServerMessage.CallEnded.class)).containsExactly(
+					new ServerMessage.CallEnded("call-1", CallEndReason.POLICY_TERMINATED));
+			assertThat(agent.last()).isEqualTo(new ServerMessage.StatusChanged(AgentState.READY, StatusReason.CALL_ENDED));
+		}
+
+		@Test
+		@DisplayName("세션 종료 멘트 중 민원인이 먼저 끊으면 정책 종료 타이머는 아무것도 하지 않는다")
+		void hangupDuringSessionEnd() {
+			abuse();
+			abuse();
+			abuse();
+			abuse();
+			coordinator.handle(citizen, new ClientMessage.Hangup("call-1"));
+			agent.clear();
+
+			ringTimer.runEvenIfCancelled(0);
+
+			assertThat(agent.messages).isEmpty();
+		}
+
+		@Test
+		@DisplayName("상담원이 오탐지로 차단을 풀면 그 폭언 줄이 같은 eventId의 FALSE_POSITIVE로 바뀌고 횟수에서 빠진다")
+		void falsePositiveOnRelease() {
+			abuse();
+			agent.clear();
+
+			coordinator.holdMute("call-1", false);
+
+			assertThat(agent.messages).containsExactly(
+					new ServerMessage.MuteHoldChanged("call-1", false),
+					new ServerMessage.ProtectionEvent("call-1", "call-1-e1", CallProtection.EventKind.FALSE_POSITIVE, 0, 0,
+							"개새끼", "개새끼"),
+					new ServerMessage.ProtectionState("call-1", 0, 2, 0, 2, 0, 1));
+		}
+
+		@Test
+		@DisplayName("발화가 끝나면 그 구간 음성으로 감정을 판단해 emotion을 보내고, 격양이 정책 시간만큼 이어지면 폭언 1회로 센다")
+		void emotionAndAgitation() {
+			emotion.willReturn(new EmotionResult(85, true), new EmotionResult(90, true));
+
+			speak(30, "도대체 언제까지");
+			assertThat(emotion.lastPcm).hasSize(30 * CallCoordinator.FRAME_BYTES);
+			assertThat(agent.all(ServerMessage.Emotion.class)).containsExactly(new ServerMessage.Emotion("call-1", 85, true));
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).isEmpty();
+
+			speak(30, "기다리게 하는 거예요!");
+
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).singleElement().satisfies(event -> {
+				assertThat(event.kind()).isEqualTo(CallProtection.EventKind.AGITATION);
+				assertThat(event.startMs()).isZero();
+				assertThat(event.text()).isEqualTo("도대체 언제까지 기다리게 하는 거예요!");
+				assertThat(event.keyword()).isNull();
+			});
+			assertThat(agent.all(ServerMessage.ProtectionState.class).getLast().abuseCount()).isEqualTo(1);
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isFalse(); // 격양만으로는 차단하지 않는다
+		}
+
+		@Test
+		@DisplayName("같은 발화를 키워드 감지와 STT 위험 판단이 함께 알려도 폭언은 한 번만 센다")
+		void keywordAndSttRiskCountOnce() {
+			long from = clock.millis();
+			elapse(1_000);
+			long to = clock.millis();
+			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "개새끼야", true, from, to));
+			stt.listener("call-1").onRisk(new SttRisk(from + 200, to, "AGENT", "ABUSE", "HIGH", "개새끼야"));
+
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).hasSize(1);
+			assertThat(agent.all(ServerMessage.ProtectionState.class).getLast().abuseCount()).isEqualTo(1);
+		}
+
+		@Test
+		@DisplayName("STT가 위험이 아니라고(NORMAL) 판단한 구간은 폭언으로 세지 않는다")
+		void normalRiskIsNotCounted() {
+			long now = clock.millis();
+			stt.listener("call-1").onRisk(new SttRisk(now, now, null, "NORMAL", "LOW", "안녕하세요"));
+
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).isEmpty();
+		}
+
+		@Test
+		@DisplayName("발화 시작 시각을 모르는 첫 발화는 통화 연결 때부터의 음성으로 판단한다")
+		void firstUtteranceWithoutStart() {
+			emotion.willReturn(new EmotionResult(95, true));
+			elapse(500);
+			for (int i = 0; i < 60; i++) {
+				coordinator.relayAudio(citizen, frame(1));
+				elapse(20);
+			}
+			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "도대체 뭐 하는 거예요!", true, null, clock.millis()));
+
+			assertThat(emotion.lastPcm).hasSize(60 * CallCoordinator.FRAME_BYTES);
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).singleElement()
+					.satisfies(event -> assertThat(event.startMs()).isZero());
+		}
+
+		@Test
+		@DisplayName("감정 판단은 발화 순서대로 하나씩 보내, 앞 결과가 나오기 전에는 다음 발화를 보내지 않는다")
+		void emotionInOrder() {
+			emotion.deferred = true;
+			speak(5, "첫 문장");
+			speak(5, "둘째 문장");
+			assertThat(emotion.calls).isEqualTo(1);
+
+			emotion.pending.getFirst().complete(new EmotionResult(20, false));
+
+			assertThat(emotion.calls).isEqualTo(2);
+			emotion.pending.getLast().complete(new EmotionResult(80, true));
+			assertThat(agent.all(ServerMessage.Emotion.class)).containsExactly(
+					new ServerMessage.Emotion("call-1", 20, false), new ServerMessage.Emotion("call-1", 80, true));
+		}
+
+		@Test
+		@DisplayName("중간 자막은 감정 판단에 보내지 않는다")
+		void interimTranscriptSkipsEmotion() {
+			coordinator.relayAudio(citizen, frame(1));
+			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "가로등", false, clock.millis(), clock.millis()));
+
+			assertThat(emotion.calls).isZero();
+		}
+
+		@Test
+		@DisplayName("통화 중에 정책을 바꿔도 그 통화는 시작할 때의 정책을 쓰고, 다음 통화부터 바뀐 정책을 쓴다")
+		void policyAppliesFromNextCall() {
+			policyStore.save(new ProtectionPolicy(7, AfterNotice.IMMEDIATE, 3, 10));
+			abuse();
+			assertThat(agent.all(ServerMessage.ProtectionState.class).getLast().abuseLimit()).isEqualTo(2);
+
+			coordinator.handle(agent, new ClientMessage.Hangup("call-1"));
+			citizen("call-2");
+			agent.clear();
+			coordinator.handle(agent, new ClientMessage.Accept("call-2"));
+
+			assertThat(agent.last()).isEqualTo(new ServerMessage.ProtectionState("call-2", 0, 7, 0, 1, 0, 10));
+		}
 	}
 }
