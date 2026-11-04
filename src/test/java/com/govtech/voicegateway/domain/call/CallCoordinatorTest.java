@@ -445,6 +445,16 @@ class CallCoordinatorTest {
 		}
 
 		@Test
+		@DisplayName("통화가 끝난 뒤 REST로 차단 유지를 바꾸면 알림을 보내지 않는다")
+		void holdMuteAfterHangupDoesNotNotify() {
+			coordinator.handle(citizen, new ClientMessage.Hangup("call-1"));
+			agent.clear();
+
+			assertThat(coordinator.holdMute("call-1", false)).isEmpty();
+			assertThat(agent.messages).isEmpty();
+		}
+
+		@Test
 		@DisplayName("통화 중이 아닌 callId의 차단 유지는 비어 있다")
 		void holdMuteUnknownCall() {
 			assertThat(coordinator.holdMute("none", true)).isEmpty();

@@ -125,15 +125,19 @@ public class CallCoordinator {
 	public OptionalInt holdMute(String callId, boolean hold) {
 		OptionalInt muted = setHold(callId, hold);
 		if (muted.isPresent()) {
-			notifyHold(callId, hold);
+			notifyHold(callId);
 		}
 		return muted;
 	}
 
-	private synchronized void notifyHold(String callId, boolean hold) {
+	/**
+	 * 지금 차단 상태를 상담원 앱에 알린다. 요청 값이 아니라 잠금 안에서 다시 읽은 실제 상태를 보내,
+	 * 해제와 거의 동시에 위험 판단이 다시 켠 경우에도 마지막 알림이 실제 상태와 같게 한다.
+	 */
+	private synchronized void notifyHold(String callId) {
 		Call call = callsById.get(callId);
 		if (call != null && call.state == CallState.CONNECTED && call.agent != null) {
-			call.agent.connection.send(new ServerMessage.MuteHoldChanged(callId, hold));
+			call.agent.connection.send(new ServerMessage.MuteHoldChanged(callId, call.delayLine.isHold()));
 		}
 	}
 
