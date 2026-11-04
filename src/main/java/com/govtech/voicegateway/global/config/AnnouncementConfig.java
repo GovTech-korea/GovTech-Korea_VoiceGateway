@@ -15,7 +15,7 @@ public class AnnouncementConfig {
 
 	@Bean
 	Announcements announcements() {
-		return new Announcements(load("risk-hold"), load("abuse-notice"), load("after-notice"), load("session-end"));
+		return new Announcements(load("abuse-notice"), load("after-notice"), load("session-end"));
 	}
 
 	private static Announcement load(String name) {

@@ -28,8 +28,8 @@ class AnnouncementControllerTest {
 		@Bean
 		Announcements announcements() {
 			byte[] frame = new byte[640];
-			return new Announcements(new Announcement(List.of(frame)), new Announcement(List.of(frame, frame)),
-					new Announcement(List.of(frame)), new Announcement(List.of(frame, frame, frame)));
+			return new Announcements(new Announcement(List.of(frame, frame)), new Announcement(List.of(frame)),
+					new Announcement(List.of(frame, frame, frame)));
 		}
 	}
 
