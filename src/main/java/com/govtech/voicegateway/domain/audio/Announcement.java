@@ -39,4 +39,13 @@ public record Announcement(List<byte[]> frames) {
 	public long durationMs() {
 		return frames.size() * 20L;
 	}
+
+	/** 프레임을 이어 붙인 PCM 전체 */
+	public byte[] pcm() {
+		byte[] pcm = new byte[frames.size() * FRAME_BYTES];
+		for (int i = 0; i < frames.size(); i++) {
+			System.arraycopy(frames.get(i), 0, pcm, i * FRAME_BYTES, FRAME_BYTES);
+		}
+		return pcm;
+	}
 }
