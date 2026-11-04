@@ -15,3 +15,11 @@ voicegateway:
     format: PCM16_16K
     # 지정하면 통화마다 STT로 보낸 바이트를 <callId>-<시작 ms>.pcm으로 남긴다 (예: runtime/stt-dump, runtime/은 git 제외)
     # dump-dir: runtime/stt-dump
+  emotion:
+    # 감정 모델 서버 주소. 발화 음성을 WAV로 POST하고 {"score": 0~100}을 받는다. 없으면 목업(목소리 크기·문장)으로 판단
+    # url: http://127.0.0.1:8200/v1/emotion
+    # 이 점수 이상이면 격양
+    agitated-score: 70
+  policy:
+    # 정책 API(/api/v1/policy)를 브라우저에서 부를 수 있는 웹 주소. 웹 주소가 정해지면 그 주소로 좁힌다 (예: https://web.example.com)
+    allowed-origins: "*"

@@ -12,11 +12,15 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 import org.springframework.stereotype.Service;
 
 import com.govtech.voicegateway.domain.audio.Announcement;
+import com.govtech.voicegateway.domain.audio.Announcements;
+import com.govtech.voicegateway.domain.audio.AudioHistory;
 import com.govtech.voicegateway.domain.audio.AudioSink;
 import com.govtech.voicegateway.domain.audio.DelayLine;
 import com.govtech.voicegateway.domain.audio.DelayLines;
@@ -28,7 +32,11 @@ import com.govtech.voicegateway.domain.call.message.ServerMessage;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.CallEndReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.RingCancelReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.StatusReason;
+import com.govtech.voicegateway.domain.emotion.EmotionAnalyzer;
+import com.govtech.voicegateway.domain.emotion.EmotionResult;
+import com.govtech.voicegateway.domain.protection.CallProtection;
 import com.govtech.voicegateway.domain.protection.KeywordRiskDetector;
+import com.govtech.voicegateway.domain.protection.ProtectionPolicyStore;
 import com.govtech.voicegateway.domain.stt.SttListener;
 import com.govtech.voicegateway.domain.stt.SttRelay;
 import com.govtech.voicegateway.domain.stt.SttRisk;
@@ -45,6 +53,7 @@ import lombok.extern.slf4j.Slf4j;
  * 잠금 없이 {@link #audioSinks}만 보고 전달한다. 민원인 음성은 받는 즉시 STT로 보내고({@link SttRelay}),
  * 통화별 {@link DelayLine}을 거쳐 설정한 시간({@code voicegateway.delay-ms})만큼 늦게 상담원에게 간다.
  * 상담원 음성은 바로 민원인에게 간다. 위험 발화로 차단을 시작하면 민원인에게 안내 음성을 들려주고, 그동안 상담원 음성은 보내지 않는다.
+ * 폭언과 감정 격양은 통화별 {@link CallProtection}이 보호 정책대로 세고, 정책에 닿으면 안내 멘트를 틀거나 통화를 끊는다.
  */
 @Slf4j
 @Service
@@ -52,13 +61,19 @@ import lombok.extern.slf4j.Slf4j;
 public class CallCoordinator {
 
 	static final int FRAME_BYTES = 640;
+	/** 감정 분석에 보낼 발화 음성을 꺼내려고 들고 있는 최근 민원인 음성 (30초) */
+	static final int HISTORY_FRAMES = 1500;
+	/** '세션 종료' 멘트가 앱에서 끝까지 재생되도록 멘트 길이보다 조금 더 기다렸다가 끊는다 */
+	static final long TERMINATE_MARGIN_MS = 500;
 
 	private final VoiceGatewayProperties properties;
 	private final RingTimer ringTimer;
 	private final DelayLines delayLines;
 	private final SttRelay sttRelay;
 	private final KeywordRiskDetector riskDetector;
-	private final Announcement riskHoldAnnouncement;
+	private final Announcements announcements;
+	private final ProtectionPolicyStore policyStore;
+	private final EmotionAnalyzer emotionAnalyzer;
 	private final Clock clock;
 
 	private final Map<String, Agent> agentsById = new HashMap<>();
@@ -119,13 +134,18 @@ public class CallCoordinator {
 
 	/**
 	 * 상담원이 REST로 민원인 음성 차단 유지를 켜거나 끈다. 바뀐 상태는 상담원 앱에 mute-hold-changed로도 알린다.
+	 * 끄면 오탐지 해제로 보고, 그 차단 중에 확정한 폭언을 횟수에서 뺀다. 위험 판단의 차단 시작({@code protect})과 겹치지 않게
+	 * 해제부터 오탐지 처리까지 한 잠금 안에서 한다.
 	 *
 	 * @return 켤 때 새로 무음 처리한 대기 프레임 수 (끌 때는 0). 통화 중인 callId가 아니면 비어 있다
 	 */
-	public OptionalInt holdMute(String callId, boolean hold) {
+	public synchronized OptionalInt holdMute(String callId, boolean hold) {
 		OptionalInt muted = setHold(callId, hold);
 		if (muted.isPresent()) {
 			notifyHold(callId);
+			if (!hold) {
+				applyProtection(callId, CallProtection::falsePositive);
+			}
 		}
 		return muted;
 	}
@@ -163,9 +183,10 @@ public class CallCoordinator {
 		return OptionalInt.of(muted);
 	}
 
+	/** 재생 중인 안내를 멈춘다. '세션 종료' 멘트는 통화를 끊기 전 끝까지 들려준다 */
 	private synchronized void stopAnnouncement(String callId) {
 		Call call = callsById.get(callId);
-		if (call != null && call.announcement != null) {
+		if (call != null && call.announcement != null && !(call.protection != null && call.protection.isTerminating())) {
 			call.announcement.stop();
 		}
 	}
@@ -255,13 +276,17 @@ public class CallCoordinator {
 		DelayLine delayLine = delayLines.open(Duration.ofMillis(properties.delayMs()), agent.connection::sendAudio);
 		call.delayLine = delayLine;
 		delayLinesByCall.put(callId, delayLine);
+		call.connectedAtEpochMs = clock.millis();
+		call.protection = new CallProtection(callId, policyStore.get());
+		AudioHistory history = new AudioHistory(HISTORY_FRAMES);
+		call.history = history;
 		SttRelay.Session stt = sttRelay.open(callId, new CallSttListener(call, agent.connection));
 		call.stt = stt;
-		call.connectedAtEpochMs = clock.millis();
 		audioSinks.put(call.citizen.id(), frame -> {
 			long receivedAt = clock.millis();
 			delayLine.offer(frame, delayLines.nowNanos(), receivedAt);
 			stt.accept(frame, receivedAt);
+			history.add(frame, receivedAt);
 		});
 		audioSinks.put(agent.connection.id(), frame -> {
 			if (!call.isAnnouncing()) { // 안내 음성과 섞이지 않게 그동안 상담원 음성은 버린다
@@ -270,6 +295,7 @@ public class CallCoordinator {
 		});
 		call.citizen.send(new ServerMessage.Connected(callId, Role.AGENT, 0));
 		agent.connection.send(new ServerMessage.Connected(callId, Role.CITIZEN, properties.delayMs()));
+		agent.connection.send(protectionState(call.protection.state()));
 		log.info("통화 연결: {} ↔ {}", callId, agent.agentId);
 	}
 
@@ -425,6 +451,9 @@ public class CallCoordinator {
 				if (call.announcement != null) {
 					call.announcement.stop();
 				}
+				if (call.terminateTimer != null) {
+					call.terminateTimer.cancel();
+				}
 				call.stt.close();
 				if (agent != null) {
 					audioSinks.remove(agent.connection.id());
@@ -502,6 +531,78 @@ public class CallCoordinator {
 		}
 	}
 
+	// ---------- 보호 정책 ----------
+
+	private synchronized void applyProtection(String callId, Function<CallProtection, CallProtection.Result> step) {
+		Call call = callsById.get(callId);
+		if (call != null && call.state == CallState.CONNECTED) {
+			applyProtection(call, step);
+		}
+	}
+
+	/**
+	 * 보호 정책 한 단계를 적용하고, 생긴 보호 기록과 바뀐 카운터를 상담원에게 보낸 뒤 정해진 안내 멘트를 튼다.
+	 *
+	 * @return 틀기로 한 안내 멘트 (없으면 NONE)
+	 */
+	private synchronized CallProtection.Action applyProtection(Call call, Function<CallProtection, CallProtection.Result> step) {
+		if (!isConnected(call)) {
+			return CallProtection.Action.NONE;
+		}
+		CallProtection.State before = call.protection.state();
+		CallProtection.Result result = step.apply(call.protection);
+		ClientConnection agentConnection = call.agent.connection;
+		for (CallProtection.Event event : result.events()) {
+			agentConnection.send(new ServerMessage.ProtectionEvent(call.callId, event.eventId(), event.kind(),
+					event.startMs(), event.endMs(), event.text(), event.keyword()));
+		}
+		CallProtection.State after = call.protection.state();
+		if (!after.equals(before)) {
+			agentConnection.send(protectionState(after));
+		}
+		switch (result.action()) {
+			case NONE -> {
+			}
+			case ABUSE_NOTICE -> play(call, announcements.abuseNotice(), "폭언 안내");
+			case AFTER_NOTICE -> play(call, announcements.afterNotice(), "폭언 후 안내");
+			case SESSION_END -> {
+				play(call, announcements.sessionEnd(), "세션 종료");
+				long waitMs = announcements.sessionEnd().durationMs() + TERMINATE_MARGIN_MS;
+				call.terminateTimer = ringTimer.schedule(Duration.ofMillis(waitMs), () -> terminateByPolicy(call));
+			}
+		}
+		return result.action();
+	}
+
+	/** 지금 재생 중인 안내를 멈추고 새 안내를 처음부터 튼다 */
+	private void play(Call call, Announcement announcement, String name) {
+		if (call.announcement != null) {
+			call.announcement.stop();
+		}
+		if (announcement.frames().isEmpty()) {
+			return;
+		}
+		call.announcement = delayLines.play(announcement.frames(), call.citizen::sendAudio);
+		log.info("민원인 안내 멘트 재생: {} {} ({}ms)", call.callId, name, announcement.durationMs());
+	}
+
+	private synchronized void terminateByPolicy(Call call) {
+		if (isConnected(call)) {
+			endCall(call, CallEndReason.POLICY_TERMINATED, true);
+		}
+	}
+
+	private static ServerMessage.ProtectionState protectionState(CallProtection.State state) {
+		return new ServerMessage.ProtectionState(state.callId(), state.abuseCount(), state.abuseLimit(),
+				state.afterNoticeCount(), state.afterNoticeLimit(), state.agitationSeconds(), state.agitationLimitSeconds());
+	}
+
+	/** 통화 연결부터 잰 ms. 시각을 모르면 지금 */
+	private long sinceConnected(Call call, Long epochMs) {
+		long at = epochMs == null ? clock.millis() : epochMs;
+		return Math.max(0, at - call.connectedAtEpochMs);
+	}
+
 	private synchronized boolean isConnected(Call call) {
 		return callsById.get(call.callId) == call && call.state == CallState.CONNECTED;
 	}
@@ -523,10 +624,17 @@ public class CallCoordinator {
 		private final Call call;
 		private final ClientConnection agentConnection;
 		private final Set<String> notified = ConcurrentHashMap.newKeySet();
+		/** 앞 발화가 끝난 시각. 처음에는 통화 연결 시각 (STT 결과 스레드에서만 쓴다) */
+		private long lastUtteranceEndMs;
+		/** 감정 분석을 발화 순서대로 하나씩 하도록 이어 붙이는 꼬리 (STT 결과 스레드에서만 쓴다) */
+		private CompletableFuture<Void> emotionTail = CompletableFuture.completedFuture(null);
+		/** 마지막으로 센 폭언이 끝난 시각 (잠금 안에서만 쓴다) */
+		private Long lastAbuseToMs;
 
 		private CallSttListener(Call call, ClientConnection agentConnection) {
 			this.call = call;
 			this.agentConnection = agentConnection;
+			this.lastUtteranceEndMs = call.connectedAtEpochMs;
 		}
 
 		@Override
@@ -537,20 +645,66 @@ public class CallCoordinator {
 			sendIfConnected(call, agentConnection, new ServerMessage.Transcript(call.callId, transcript.utteranceId(),
 					transcript.text(), transcript.isFinal()));
 			riskDetector.detect(transcript.text(), transcript.isFinal()).ifPresent(match -> protect(transcript.utteranceId(), transcript.text(),
-					transcript.fromEpochMs(), match.riskType(), match.severity(), match.keyword()));
+					transcript.fromEpochMs(), transcript.toEpochMs(), match.riskType(), match.severity(), match.keyword()));
+			if (transcript.isFinal()) {
+				analyzeEmotion(transcript);
+			}
+		}
+
+		/**
+		 * 끝난 발화의 음성을 감정 분석에 보낸다. 발화 시작 시각을 모르면 앞 발화가 끝난 뒤부터로 본다.
+		 * 결과는 상담원에게 emotion으로 보내고, 격양이 이어진 시간은 보호 정책이 센다.
+		 */
+		private void analyzeEmotion(SttTranscript transcript) {
+			long to = transcript.toEpochMs() == null ? clock.millis() : transcript.toEpochMs();
+			long from = transcript.fromEpochMs() != null ? transcript.fromEpochMs() : lastUtteranceEndMs;
+			lastUtteranceEndMs = to + 1;
+			byte[] pcm = call.history.between(from, to);
+			if (pcm.length == 0) {
+				return;
+			}
+			long startMs = sinceConnected(call, from);
+			long endMs = startMs + pcm.length / (FRAME_BYTES / 20);
+			// 앞 발화 결과가 나온 뒤에 보낸다 (결과 순서가 바뀌면 격양이 이어진 시간이 틀어진다)
+			emotionTail = emotionTail
+					.thenCompose(ignored -> isConnected(call)
+							? emotionAnalyzer.analyze(pcm, transcript.text())
+							: CompletableFuture.<EmotionResult>completedFuture(null))
+					.thenAccept(result -> {
+						if (result != null) {
+							onEmotion(result, startMs, endMs, transcript.text());
+						}
+					})
+					.exceptionally(e -> {
+						log.warn("감정 분석 실패: {} {}", call.callId, e.toString());
+						return null;
+					});
+		}
+
+		private void onEmotion(EmotionResult result, long startMs, long endMs, String text) {
+			synchronized (CallCoordinator.this) {
+				if (!isConnected(call)) {
+					return;
+				}
+				agentConnection.send(new ServerMessage.Emotion(call.callId, result.score(), result.agitated()));
+				applyProtection(call, protection -> protection.emotion(result.agitated(), startMs, endMs, text));
+			}
 		}
 
 		@Override
 		public void onRisk(SttRisk risk) {
 			if (isConnected(call)) {
 				protect("risk-" + risk.fromEpochMs() + "-" + risk.toEpochMs(), risk.text(), risk.fromEpochMs(),
-						risk.riskType(), risk.severity(), null);
+						risk.toEpochMs(), risk.riskType(), risk.severity(), null);
 			}
 		}
 
 		@Override
 		public void onHold(boolean on) {
 			if (isConnected(call) && setHold(call.callId, on).isPresent()) {
+				if (!on) {
+					call.protection.holdReleased();
+				}
 				sendIfConnected(call, agentConnection, new ServerMessage.MuteHoldChanged(call.callId, on));
 			}
 		}
@@ -560,27 +714,52 @@ public class CallCoordinator {
 		 * 욕한 민원인은 다음 말도 폭언일 가능성이 높아, 상담원이 직접 풀 때까지 민원인 음성을 계속 막는다.
 		 * 같은 발화의 결과가 더 와도 다시 지우거나 켜지 않는다 (상담원이 푼 뒤 바로 다시 막히지 않게).
 		 */
-		private void protect(String key, String text, Long fromEpochMs, String riskType, String severity, String keyword) {
+		private void protect(String key, String text, Long fromEpochMs, Long toEpochMs, String riskType, String severity,
+				String keyword) {
 			if (!notified.add(key)) {
 				return;
 			}
-			DelayLine line = delayLinesByCall.get(call.callId);
-			if (line == null) {
-				return;
+			// 차단 시작과 폭언 등록을 한 잠금 안에서 해, 상담원의 오탐지 해제가 그 사이에 끼지 않게 한다
+			synchronized (CallCoordinator.this) {
+				DelayLine line = delayLinesByCall.get(call.callId);
+				if (line == null || !isConnected(call)) {
+					return;
+				}
+				DelayLine.HoldStart hold = line.startHold(fromEpochMs == null ? Long.MIN_VALUE : fromEpochMs);
+				if (line.isClosed()) {
+					return; // 그 사이 통화가 끝났다
+				}
+				// 발화 본문은 개인정보를 담을 수 있어 로그에는 유형과 찾은 단어만 남긴다
+				log.info("위험 발화 감지: {} {} {} '{}' (무음 {}프레임, 차단 유지)", call.callId, riskType, severity, keyword,
+						hold.muted());
+				agentConnection.send(new ServerMessage.RiskDetected(call.callId, key, text, riskType, severity, keyword,
+						hold.muted()));
+				if (!hold.wasHeld()) {
+					agentConnection.send(new ServerMessage.MuteHoldChanged(call.callId, true));
+				}
+				CallProtection.Action action = CallProtection.Action.NONE;
+				if (countsAsAbuse(fromEpochMs, toEpochMs, riskType)) {
+					action = applyProtection(call, protection -> protection.abuse(sinceConnected(call, fromEpochMs),
+							sinceConnected(call, toEpochMs), text, keyword));
+				}
+				if (!hold.wasHeld() && action == CallProtection.Action.NONE) {
+					announce(); // 정책 멘트를 틀었으면 그것으로 대신한다
+				}
 			}
-			DelayLine.HoldStart hold = line.startHold(fromEpochMs == null ? Long.MIN_VALUE : fromEpochMs);
-			if (line.isClosed()) {
-				return; // 그 사이 통화가 끝났다
+		}
+
+		/**
+		 * 폭언 1회로 셀지. 같은 발화를 키워드 감지와 STT 위험 판단이 함께 알려도 한 번만 세도록,
+		 * 앞서 센 폭언과 시간이 겹치면 세지 않는다. 위험이 아니라는 판단(NORMAL, NONE)도 세지 않는다.
+		 */
+		private boolean countsAsAbuse(Long fromEpochMs, Long toEpochMs, String riskType) {
+			if (riskType == null || riskType.equals("NORMAL") || riskType.equals("NONE")) {
+				return false;
 			}
-			// 발화 본문은 개인정보를 담을 수 있어 로그에는 유형과 찾은 단어만 남긴다
-			log.info("위험 발화 감지: {} {} {} '{}' (무음 {}프레임, 차단 유지)", call.callId, riskType, severity, keyword,
-					hold.muted());
-			sendIfConnected(call, agentConnection, new ServerMessage.RiskDetected(call.callId, key, text, riskType,
-					severity, keyword, hold.muted()));
-			if (!hold.wasHeld()) {
-				sendIfConnected(call, agentConnection, new ServerMessage.MuteHoldChanged(call.callId, true));
-				announce();
-			}
+			boolean overlaps = fromEpochMs != null && lastAbuseToMs != null && fromEpochMs <= lastAbuseToMs;
+			long to = toEpochMs != null ? toEpochMs : clock.millis();
+			lastAbuseToMs = lastAbuseToMs == null ? to : Math.max(lastAbuseToMs, to);
+			return !overlaps;
 		}
 
 		/**
@@ -591,12 +770,12 @@ public class CallCoordinator {
 			synchronized (CallCoordinator.this) {
 				DelayLine line = delayLinesByCall.get(call.callId);
 				if (!isConnected(call) || line == null || !line.isHold() || call.isAnnouncing()
-						|| riskHoldAnnouncement.frames().isEmpty()) {
+						|| announcements.riskHold().frames().isEmpty()) {
 					return;
 				}
-				call.announcement = delayLines.play(riskHoldAnnouncement.frames(), call.citizen::sendAudio);
+				call.announcement = delayLines.play(announcements.riskHold().frames(), call.citizen::sendAudio);
 			}
-			log.info("민원인 안내 음성 재생: {} ({}ms)", call.callId, riskHoldAnnouncement.durationMs());
+			log.info("민원인 안내 음성 재생: {} ({}ms)", call.callId, announcements.riskHold().durationMs());
 		}
 	}
 
@@ -610,6 +789,9 @@ public class CallCoordinator {
 		private DelayLine delayLine;
 		private SttRelay.Session stt;
 		private long connectedAtEpochMs;
+		private CallProtection protection;
+		private AudioHistory history;
+		private RingTimer.Cancellable terminateTimer;
 		/** 민원인에게 재생 중인 안내 음성. 상담원 음성 전달 스레드가 읽으므로 volatile */
 		private volatile Playback announcement;
 
