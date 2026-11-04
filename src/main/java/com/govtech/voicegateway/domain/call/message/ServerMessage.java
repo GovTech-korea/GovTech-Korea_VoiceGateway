@@ -78,15 +78,15 @@ public sealed interface ServerMessage {
 	}
 
 	/** 상담원에게: 위험 발화를 찾아 그 구간을 자동으로 차단함 (발화마다 한 번) */
-	record RiskDetected(String callId, String utteranceId, String text, String riskType, String severity, String target,
-			String keyword, int mutedFrames) implements ServerMessage {
+	record RiskDetected(String callId, String utteranceId, String text, String riskType, String severity, String keyword,
+			int mutedFrames) implements ServerMessage {
 		@Override
 		public String type() {
 			return "risk-detected";
 		}
 	}
 
-	/** 상담원에게: STT·위험 판단이 차단 유지를 켜거나 껐음 */
+	/** 상담원에게: 차단 유지가 켜지거나 꺼짐 (위험 판단이 켜든, 상담원이 REST로 켜고 끄든) */
 	record MuteHoldChanged(String callId, boolean hold) implements ServerMessage {
 		@Override
 		public String type() {

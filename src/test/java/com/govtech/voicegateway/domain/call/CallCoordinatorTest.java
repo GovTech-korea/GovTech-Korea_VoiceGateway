@@ -433,6 +433,28 @@ class CallCoordinatorTest {
 		}
 
 		@Test
+		@DisplayName("상담원이 REST로 차단 유지를 켜고 끄면 상담원 앱에 mute-hold-changed를 보낸다")
+		void holdMuteNotifiesAgent() {
+			agent.clear();
+
+			coordinator.holdMute("call-1", true);
+			coordinator.holdMute("call-1", false);
+
+			assertThat(agent.messages).containsExactly(new ServerMessage.MuteHoldChanged("call-1", true),
+					new ServerMessage.MuteHoldChanged("call-1", false));
+		}
+
+		@Test
+		@DisplayName("통화가 끝난 뒤 REST로 차단 유지를 바꾸면 알림을 보내지 않는다")
+		void holdMuteAfterHangupDoesNotNotify() {
+			coordinator.handle(citizen, new ClientMessage.Hangup("call-1"));
+			agent.clear();
+
+			assertThat(coordinator.holdMute("call-1", false)).isEmpty();
+			assertThat(agent.messages).isEmpty();
+		}
+
+		@Test
 		@DisplayName("통화 중이 아닌 callId의 차단 유지는 비어 있다")
 		void holdMuteUnknownCall() {
 			assertThat(coordinator.holdMute("none", true)).isEmpty();
@@ -480,7 +502,7 @@ class CallCoordinatorTest {
 			assertThat(agent.audio).containsExactly(new byte[640], new byte[640], new byte[640]);
 			assertThat(agent.messages).filteredOn(ServerMessage.RiskDetected.class::isInstance)
 					.singleElement()
-					.isEqualTo(new ServerMessage.RiskDetected("call-1", "call-1-0", "당신 개새끼", "ABUSE", "MEDIUM", null, "개새끼", 2));
+					.isEqualTo(new ServerMessage.RiskDetected("call-1", "call-1-0", "당신 개새끼", "ABUSE", "MEDIUM", "개새끼", 2));
 			assertThat(agent.messages).filteredOn(ServerMessage.Transcript.class::isInstance).hasSize(2);
 			assertThat(agent.messages).filteredOn(ServerMessage.MuteHoldChanged.class::isInstance)
 					.containsExactly(new ServerMessage.MuteHoldChanged("call-1", true));
@@ -623,7 +645,8 @@ class CallCoordinatorTest {
 
 			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isTrue();
 			assertThat(agent.messages).filteredOn(ServerMessage.MuteHoldChanged.class::isInstance)
-					.containsExactly(new ServerMessage.MuteHoldChanged("call-1", true), new ServerMessage.MuteHoldChanged("call-1", true));
+					.containsExactly(new ServerMessage.MuteHoldChanged("call-1", true), new ServerMessage.MuteHoldChanged("call-1", false),
+							new ServerMessage.MuteHoldChanged("call-1", true));
 		}
 
 		@Test
@@ -644,7 +667,7 @@ class CallCoordinatorTest {
 			assertThat(agent.messages).contains(new ServerMessage.MuteHoldChanged("call-1", true));
 			assertThat(agent.messages).filteredOn(ServerMessage.RiskDetected.class::isInstance)
 					.singleElement()
-					.satisfies(m -> assertThat(((ServerMessage.RiskDetected) m).target()).isEqualTo("AGENT"));
+					.satisfies(m -> assertThat(((ServerMessage.RiskDetected) m).riskType()).isEqualTo("ABUSE"));
 		}
 
 		@Test
