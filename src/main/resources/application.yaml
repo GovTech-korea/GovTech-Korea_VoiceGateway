@@ -16,8 +16,8 @@ voicegateway:
     # 지정하면 통화마다 STT로 보낸 바이트를 <callId>-<시작 ms>.pcm으로 남긴다 (예: runtime/stt-dump, runtime/은 git 제외)
     # dump-dir: runtime/stt-dump
   emotion:
-    # 감정 모델 서버 주소. 발화 음성을 WAV로 POST하고 {"score": 0~100}을 받는다. 없으면 목업(목소리 크기·문장)으로 판단
-    # url: http://127.0.0.1:8200/v1/emotion
+    # STT 서버의 감정 판정 API (streaming-asr POST /v1/acoustic-arousal). 없거나 실패하면 목업(목소리 크기·문장)으로 판단
+    # url: http://127.0.0.1:8100/v1/acoustic-arousal
     # 이 점수 이상이면 격양
     agitated-score: 70
   policy:

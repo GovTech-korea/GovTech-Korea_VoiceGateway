@@ -9,6 +9,10 @@ class MockEmotionAnalyzerTest {
 
 	private final MockEmotionAnalyzer analyzer = new MockEmotionAnalyzer(70);
 
+	private static EmotionRequest request(byte[] pcm, String text) {
+		return new EmotionRequest("call-1", pcm, text, 0, pcm.length / 32, 0);
+	}
+
 	private static byte[] tone(int amplitude, int samples) {
 		byte[] pcm = new byte[samples * 2];
 		for (int i = 0; i < samples; i++) {
@@ -22,7 +26,7 @@ class MockEmotionAnalyzerTest {
 	@Test
 	@DisplayName("조용히 차분하게 말하면 격양이 아니다")
 	void calm() {
-		EmotionResult result = analyzer.analyze(tone(300, 16_000), "가로등이 꺼져 있어요").join();
+		EmotionResult result = analyzer.analyze(request(tone(300, 16_000), "가로등이 꺼져 있어요")).join();
 
 		assertThat(result.agitated()).isFalse();
 		assertThat(result.score()).isLessThan(30);
@@ -31,7 +35,7 @@ class MockEmotionAnalyzerTest {
 	@Test
 	@DisplayName("크게 소리치며 재촉하면 격양이다")
 	void loudAndAngry() {
-		EmotionResult result = analyzer.analyze(tone(16_000, 16_000), "도대체 언제까지 기다리게 하는 거예요!").join();
+		EmotionResult result = analyzer.analyze(request(tone(16_000, 16_000), "도대체 언제까지 기다리게 하는 거예요!")).join();
 
 		assertThat(result.agitated()).isTrue();
 		assertThat(result.score()).isBetween(70, 100);

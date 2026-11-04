@@ -98,6 +98,11 @@ public final class CallProtection {
 		holdAbuses.clear();
 	}
 
+	/** 지금까지 격양이 이어진 시간 (ms) */
+	public synchronized long agitationMs() {
+		return agitationMs;
+	}
+
 	/** '세션 종료' 멘트를 틀기로 해서 곧 통화를 끊는다 */
 	public synchronized boolean isTerminating() {
 		return terminating;

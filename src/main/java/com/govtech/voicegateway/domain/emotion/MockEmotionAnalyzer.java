@@ -24,8 +24,9 @@ public class MockEmotionAnalyzer implements EmotionAnalyzer {
 	}
 
 	@Override
-	public CompletableFuture<EmotionResult> analyze(byte[] pcm, String text) {
-		return CompletableFuture.completedFuture(EmotionResult.of(loudnessScore(pcm) + textScore(text), agitatedScore));
+	public CompletableFuture<EmotionResult> analyze(EmotionRequest request) {
+		return CompletableFuture.completedFuture(
+				EmotionResult.of(loudnessScore(request.pcm()) + textScore(request.text()), agitatedScore));
 	}
 
 	static int loudnessScore(byte[] pcm) {
