@@ -52,7 +52,7 @@ import lombok.extern.slf4j.Slf4j;
  * 상태 변경은 모두 이 객체의 잠금 안에서 일어난다. 음성 프레임은 초당 50개씩 오가므로
  * 잠금 없이 {@link #audioSinks}만 보고 전달한다. 민원인 음성은 받는 즉시 STT로 보내고({@link SttRelay}),
  * 통화별 {@link DelayLine}을 거쳐 설정한 시간({@code voicegateway.delay-ms})만큼 늦게 상담원에게 간다.
- * 상담원 음성은 바로 민원인에게 간다. 위험 발화로 차단을 시작하면 민원인에게 안내 음성을 들려주고, 그동안 상담원 음성은 보내지 않는다.
+ * 상담원 음성은 바로 민원인에게 간다. 통화가 연결되면 민원인에게 '폭언 안내' 멘트를 먼저 들려주고, 안내 멘트가 나가는 동안 상담원 음성은 보내지 않는다.
  * 폭언과 감정 격양은 통화별 {@link CallProtection}이 보호 정책대로 세고, 정책에 닿으면 안내 멘트를 틀거나 통화를 끊는다.
  */
 @Slf4j
@@ -144,6 +144,7 @@ public class CallCoordinator {
 		if (muted.isPresent()) {
 			notifyHold(callId);
 			if (!hold) {
+				stopAnnouncement(callId); // 상담원이 바로 말할 수 있게 재생 중인 안내를 멈춘다
 				applyProtection(callId, CallProtection::falsePositive);
 			}
 		}
@@ -163,7 +164,6 @@ public class CallCoordinator {
 
 	/**
 	 * 민원인 음성 차단 유지를 켜거나 끈다. 켜 두는 동안 상담원에게는 무음만 간다 (STT에는 원본 그대로).
-	 * 끄면 민원인에게 재생 중인 차단 안내도 멈춰, 상담원이 바로 말할 수 있게 한다.
 	 *
 	 * @return 켤 때 새로 무음 처리한 대기 프레임 수 (끌 때는 0). 통화 중인 callId가 아니면 비어 있다
 	 */
@@ -175,9 +175,6 @@ public class CallCoordinator {
 		int muted = line.setHold(hold);
 		if (line.isClosed()) {
 			return OptionalInt.empty(); // 조회와 적용 사이에 통화가 끝났다
-		}
-		if (!hold) {
-			stopAnnouncement(callId);
 		}
 		log.info("음성 차단 유지 {}: {} (대기 프레임 {}개 무음)", hold ? "켜기" : "끄기", callId, muted);
 		return OptionalInt.of(muted);
@@ -288,14 +285,16 @@ public class CallCoordinator {
 			stt.accept(frame, receivedAt);
 			history.add(frame, receivedAt);
 		});
+		call.citizen.send(new ServerMessage.Connected(callId, Role.AGENT, 0));
+		agent.connection.send(new ServerMessage.Connected(callId, Role.CITIZEN, properties.delayMs()));
+		agent.connection.send(protectionState(call.protection.state()));
+		// 안내를 먼저 시작한 뒤 상담원 음성 경로를 연다 (그 사이 상담원 음성이 안내 전에 새어 나가지 않게)
+		play(call, announcements.abuseNotice(), "폭언 안내");
 		audioSinks.put(agent.connection.id(), frame -> {
 			if (!call.isAnnouncing()) { // 안내 음성과 섞이지 않게 그동안 상담원 음성은 버린다
 				call.citizen.sendAudio(frame);
 			}
 		});
-		call.citizen.send(new ServerMessage.Connected(callId, Role.AGENT, 0));
-		agent.connection.send(new ServerMessage.Connected(callId, Role.CITIZEN, properties.delayMs()));
-		agent.connection.send(protectionState(call.protection.state()));
 		log.info("통화 연결: {} ↔ {}", callId, agent.agentId);
 	}
 
@@ -563,7 +562,6 @@ public class CallCoordinator {
 		switch (result.action()) {
 			case NONE -> {
 			}
-			case ABUSE_NOTICE -> play(call, announcements.abuseNotice(), "폭언 안내");
 			case AFTER_NOTICE -> play(call, announcements.afterNotice(), "폭언 후 안내");
 			case SESSION_END -> {
 				play(call, announcements.sessionEnd(), "세션 종료");
@@ -737,13 +735,9 @@ public class CallCoordinator {
 				if (!hold.wasHeld()) {
 					agentConnection.send(new ServerMessage.MuteHoldChanged(call.callId, true));
 				}
-				CallProtection.Action action = CallProtection.Action.NONE;
 				if (countsAsAbuse(fromEpochMs, toEpochMs, riskType)) {
-					action = applyProtection(call, protection -> protection.abuse(sinceConnected(call, fromEpochMs),
+					applyProtection(call, protection -> protection.abuse(sinceConnected(call, fromEpochMs),
 							sinceConnected(call, toEpochMs), text, keyword));
-				}
-				if (!hold.wasHeld() && action == CallProtection.Action.NONE) {
-					announce(); // 정책 멘트를 틀었으면 그것으로 대신한다
 				}
 			}
 		}
@@ -762,21 +756,6 @@ public class CallCoordinator {
 			return !overlaps;
 		}
 
-		/**
-		 * 민원인에게 차단 안내 음성을 들려준다. 통화 종료·차단 해제와 겹치지 않게 상태 잠금 안에서 시작한다
-		 * (해제는 차단 유지를 먼저 끈 뒤 이 잠금에서 안내를 멈추므로, 그 사이에 오면 여기서 꺼진 것을 보고 시작하지 않는다).
-		 */
-		private void announce() {
-			synchronized (CallCoordinator.this) {
-				DelayLine line = delayLinesByCall.get(call.callId);
-				if (!isConnected(call) || line == null || !line.isHold() || call.isAnnouncing()
-						|| announcements.riskHold().frames().isEmpty()) {
-					return;
-				}
-				call.announcement = delayLines.play(announcements.riskHold().frames(), call.citizen::sendAudio);
-			}
-			log.info("민원인 안내 음성 재생: {} ({}ms)", call.callId, announcements.riskHold().durationMs());
-		}
 	}
 
 	private static final class Call {

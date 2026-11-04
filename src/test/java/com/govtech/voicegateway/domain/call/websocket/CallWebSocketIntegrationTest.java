@@ -4,21 +4,38 @@ import static com.govtech.voicegateway.support.WsTestClient.AUDIO;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Arrays;
+import java.util.List;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.web.socket.CloseStatus;
 
+import com.govtech.voicegateway.domain.audio.Announcement;
+import com.govtech.voicegateway.domain.audio.Announcements;
 import com.govtech.voicegateway.support.WsTestClient;
 
 /**
- * 실제 서버에 WebSocket으로 접속해 규격 v2 통화 흐름 전체를 확인한다. (지연 0으로 흐름만 본다)
+ * 실제 서버에 WebSocket으로 접속해 규격 v2 통화 흐름 전체를 확인한다. (지연 0, 안내 멘트 없이 흐름만 본다.
+ * 연결 직후 '폭언 안내' 동안 상담원 음성이 막히는 것은 CallCoordinatorTest에서 확인한다)
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 		properties = "voicegateway.delay-ms=0")
 class CallWebSocketIntegrationTest {
+
+	@TestConfiguration
+	static class SilentAnnouncements {
+		@Bean
+		@Primary
+		Announcements silentAnnouncements() {
+			Announcement none = new Announcement(List.of());
+			return new Announcements(none, none, none);
+		}
+	}
 
 	@LocalServerPort
 	private int port;

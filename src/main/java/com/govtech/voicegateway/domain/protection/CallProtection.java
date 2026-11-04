@@ -113,7 +113,7 @@ public final class CallProtection {
 			abuseCount++;
 			if (abuseCount >= policy.abuseLimit()) {
 				noticed = true;
-				return Action.ABUSE_NOTICE;
+				return Action.AFTER_NOTICE;
 			}
 			return Action.NONE;
 		}
@@ -122,7 +122,7 @@ public final class CallProtection {
 			terminating = true;
 			return Action.SESSION_END;
 		}
-		return Action.AFTER_NOTICE;
+		return Action.NONE;
 	}
 
 	private void resetAgitation() {
@@ -135,12 +135,10 @@ public final class CallProtection {
 		return callId + "-e" + (++eventSequence);
 	}
 
-	/** 민원인에게 틀 안내 멘트 */
+	/** 폭언을 센 뒤 민원인에게 틀 안내 멘트 ('폭언 안내'는 통화 연결 때 나가므로 여기 없다) */
 	public enum Action {
 		NONE,
-		/** 폭언 안내: 안내 전 폭언이 허용 횟수에 닿음 */
-		ABUSE_NOTICE,
-		/** 폭언 후 안내: 안내 후 폭언이 아직 허용 횟수 전 */
+		/** 폭언 후 안내: 안내 전 폭언이 허용 횟수에 닿음. 이후 폭언은 안내 후 횟수로 센다 */
 		AFTER_NOTICE,
 		/** 세션 종료: 멘트 뒤 통화를 끊는다 */
 		SESSION_END

@@ -17,7 +17,7 @@ class CallProtectionTest {
 	}
 
 	@Test
-	@DisplayName("폭언마다 보호 기록이 생기고, 허용 횟수째에 폭언 안내, 안내 후에는 폭언 후 안내, 마지막에 세션 종료")
+	@DisplayName("폭언마다 보호 기록이 생기고, 허용 횟수째에 폭언 후 안내, 안내 후 폭언이 추가 횟수에 닿으면 세션 종료")
 	void countsThroughPolicy() {
 		CallProtection protection = protection(2, AfterNotice.COUNT, 2, 5);
 
@@ -25,8 +25,8 @@ class CallProtectionTest {
 		assertThat(first.action()).isEqualTo(Action.NONE);
 		assertThat(first.events()).containsExactly(
 				new Event("call-1-e1", EventKind.ABUSE, 30_000, 36_000, "당신 개새끼야", "개새끼"));
-		assertThat(protection.abuse(40_000, 41_000, "시발", "시발").action()).isEqualTo(Action.ABUSE_NOTICE);
-		assertThat(protection.abuse(50_000, 51_000, "병신", "병신").action()).isEqualTo(Action.AFTER_NOTICE);
+		assertThat(protection.abuse(40_000, 41_000, "시발", "시발").action()).isEqualTo(Action.AFTER_NOTICE);
+		assertThat(protection.abuse(50_000, 51_000, "병신", "병신").action()).isEqualTo(Action.NONE);
 		assertThat(protection.abuse(60_000, 61_000, "개새끼", "개새끼").action()).isEqualTo(Action.SESSION_END);
 
 		assertThat(protection.state()).isEqualTo(new CallProtection.State("call-1", 2, 2, 2, 2, 0, 5));
@@ -39,7 +39,7 @@ class CallProtectionTest {
 	void immediate() {
 		CallProtection protection = protection(1, AfterNotice.IMMEDIATE, 5, 5);
 
-		assertThat(protection.abuse(0, 0, "시발", "시발").action()).isEqualTo(Action.ABUSE_NOTICE);
+		assertThat(protection.abuse(0, 0, "시발", "시발").action()).isEqualTo(Action.AFTER_NOTICE);
 		assertThat(protection.abuse(0, 0, "시발", "시발").action()).isEqualTo(Action.SESSION_END);
 		assertThat(protection.state().afterNoticeLimit()).isEqualTo(1);
 	}

@@ -61,8 +61,7 @@ class CallCoordinatorTest {
 		policyStore = new ProtectionPolicyStore();
 		emotion = new FakeEmotionAnalyzer();
 		Announcements announcements = new Announcements(new Announcement(List.of(frame(8), frame(9))),
-				new Announcement(List.of(frame(11))), new Announcement(List.of(frame(12))),
-				new Announcement(List.of(frame(13), frame(13))));
+				new Announcement(List.of(frame(12), frame(14))), new Announcement(List.of(frame(13), frame(13))));
 		coordinator = new CallCoordinator(new VoiceGatewayProperties(DELAY_MS, RING_TIMEOUT_MS), ringTimer, delayLines,
 				sttRelay, new KeywordRiskDetector(), announcements, policyStore, emotion, clock);
 	}
@@ -306,6 +305,8 @@ class CallCoordinatorTest {
 			agent = agent("agent-01");
 			citizen = citizen("call-1");
 			coordinator.handle(agent, new ClientMessage.Accept("call-1"));
+			elapse(0);
+			elapse(20); // 연결 직후 '폭언 안내'(2프레임)를 끝낸다
 			agent.clear();
 			citizen.clear();
 		}
@@ -425,7 +426,7 @@ class CallCoordinatorTest {
 					new CallCenterSnapshot.AgentView("agent-01", AgentState.IN_CALL, "call-1"));
 			assertThat(snapshot.queue()).containsExactly("call-2");
 			assertThat(snapshot.calls()).containsExactly(
-					new CallCenterSnapshot.CallView("call-1", "CONNECTED", "agent-01", clock.millis(), 1, 640, 0, 1, false, 1),
+					new CallCenterSnapshot.CallView("call-1", "CONNECTED", "agent-01", clock.millis() - 20, 1, 640, 0, 1, false, 1),
 					new CallCenterSnapshot.CallView("call-2", "QUEUED", null, null, 0, 0, 0, 0, false, 0));
 			assertThat(waiting.messages).isNotEmpty();
 		}
@@ -591,62 +592,6 @@ class CallCoordinatorTest {
 			assertThat(agent.messages).filteredOn(m -> m instanceof ServerMessage.RiskDetected || m instanceof ServerMessage.MuteHoldChanged)
 					.extracting(Object::getClass)
 					.containsExactly(ServerMessage.RiskDetected.class, ServerMessage.MuteHoldChanged.class);
-		}
-
-		@Test
-		@DisplayName("차단이 시작되면 민원인에게 안내 음성을 실시간으로 들려주고, 그동안 상담원 음성은 민원인에게 가지 않는다")
-		void announcesToCitizenOnHold() {
-			citizen.audio.clear();
-			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "시발", false, clock.millis(), null));
-			coordinator.relayAudio(agent, frame(5)); // 안내 중 상담원 음성
-
-			elapse(0);
-			assertThat(citizen.audio).containsExactly(frame(8)); // 20ms에 한 프레임씩
-			elapse(20);
-			coordinator.relayAudio(agent, frame(6)); // 안내가 끝난 뒤
-
-			assertThat(citizen.audio).containsExactly(frame(8), frame(9), frame(6));
-		}
-
-		@Test
-		@DisplayName("안내가 끝난 뒤 차단 유지 중에 새 위험 발화가 와도 안내를 다시 틀지 않는다")
-		void announcesOncePerHold() {
-			SttListener listener = stt.listener("call-1");
-			listener.onTranscript(new SttTranscript("call-1-0", "시발", false, clock.millis(), null));
-			elapse(0);
-			elapse(20);
-			citizen.audio.clear();
-
-			listener.onTranscript(new SttTranscript("call-1-1", "병신아", false, clock.millis(), null));
-			elapse(100);
-
-			assertThat(citizen.audio).isEmpty();
-		}
-
-		@Test
-		@DisplayName("통화가 끝나면 안내를 멈춘다")
-		void announcementStopsOnHangup() {
-			citizen.audio.clear();
-			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "시발", false, clock.millis(), null));
-			elapse(0);
-			coordinator.handle(citizen, new ClientMessage.Hangup("call-1"));
-			elapse(100);
-
-			assertThat(citizen.audio).containsExactly(frame(8));
-		}
-
-		@Test
-		@DisplayName("상담원이 차단을 풀면 안내를 멈추고 상담원 음성을 바로 보낸다")
-		void releaseStopsAnnouncement() {
-			citizen.audio.clear();
-			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "시발", false, clock.millis(), null));
-			elapse(0);
-
-			coordinator.holdMute("call-1", false);
-			coordinator.relayAudio(agent, frame(6));
-			elapse(100);
-
-			assertThat(citizen.audio).containsExactly(frame(8), frame(6));
 		}
 
 		@Test
@@ -858,22 +803,99 @@ class CallCoordinatorTest {
 		}
 
 		@Test
-		@DisplayName("허용 횟수째 폭언에는 차단 안내 대신 폭언 안내 멘트를, 안내 뒤에는 폭언 후 안내 멘트를 튼다")
-		void playsPolicyAnnouncements() {
+		@DisplayName("통화가 연결되면 민원인에게 폭언 안내를 먼저 들려주고, 그동안 상담원 음성은 민원인에게 보내지 않는다")
+		void greetsOnConnect() {
+			coordinator.relayAudio(agent, frame(5)); // 안내 중 상담원 음성
+
+			elapse(0);
+			assertThat(citizen.audio).containsExactly(frame(8)); // 20ms에 한 프레임씩
+			elapse(20);
+			coordinator.relayAudio(agent, frame(6)); // 안내가 끝난 뒤
+
+			assertThat(citizen.audio).containsExactly(frame(8), frame(9), frame(6));
+		}
+
+		@Test
+		@DisplayName("STT가 차단을 풀어도 재생 중인 안내는 끝까지 나간다")
+		void sttReleaseKeepsAnnouncement() {
+			elapse(0);
+			stt.listener("call-1").onHold(true);
+			stt.listener("call-1").onHold(false);
+			coordinator.relayAudio(agent, frame(6));
+			elapse(20);
+
+			assertThat(citizen.audio).containsExactly(frame(8), frame(9));
+		}
+
+		@Test
+		@DisplayName("폭언 안내 중 상담원이 REST로 차단을 풀면 안내를 멈추고 상담원 음성을 보낸다")
+		void agentReleaseStopsGreeting() {
+			elapse(0);
+			coordinator.holdMute("call-1", false);
+			coordinator.relayAudio(agent, frame(6));
+			elapse(100);
+
+			assertThat(citizen.audio).containsExactly(frame(8), frame(6));
+		}
+
+		@Test
+		@DisplayName("폭언 안내 중 허용 횟수에 닿으면 폭언 안내를 멈추고 폭언 후 안내를 처음부터 튼다")
+		void afterNoticeReplacesGreeting() {
+			elapse(0);
+			abuse();
 			abuse();
 			elapse(0);
 			elapse(20);
-			assertThat(citizen.audio).containsExactly(frame(8), frame(9)); // 첫 폭언: 차단 안내
+
+			assertThat(citizen.audio).containsExactly(frame(8), frame(12), frame(14));
+		}
+
+		@Test
+		@DisplayName("폭언 안내 중 통화가 끝나면 안내를 멈춘다")
+		void greetingStopsOnHangup() {
+			elapse(0);
+			coordinator.handle(citizen, new ClientMessage.Hangup("call-1"));
+			elapse(100);
+
+			assertThat(citizen.audio).containsExactly(frame(8));
+		}
+
+		@Test
+		@DisplayName("허용 횟수 전 폭언에는 멘트 없이 차단만 하고, 허용 횟수째에 폭언 후 안내, 안내 후 폭언은 종료 횟수 전까지 멘트 없음")
+		void playsAnnouncementsByPolicy() {
+			elapse(0);
+			elapse(20);
 			citizen.audio.clear();
 
-			abuse();
+			abuse(); // 1/2
+			elapse(100);
+			assertThat(citizen.audio).isEmpty();
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isTrue();
+
+			abuse(); // 2/2 → 폭언 후 안내
 			elapse(0);
-			assertThat(citizen.audio).containsExactly(frame(11)); // 폭언 안내
+			elapse(20);
+			assertThat(citizen.audio).containsExactly(frame(12), frame(14));
 			citizen.audio.clear();
 
+			abuse(); // 안내 후 1/2
+			elapse(100);
+			assertThat(citizen.audio).isEmpty();
+		}
+
+		@Test
+		@DisplayName("상담원이 차단을 풀면 폭언 후 안내를 멈추고 상담원 음성을 바로 보낸다")
+		void releaseStopsAfterNotice() {
 			abuse();
+			abuse();
+			citizen.audio.clear();
 			elapse(0);
-			assertThat(citizen.audio).containsExactly(frame(12)); // 폭언 후 안내
+
+			coordinator.holdMute("call-1", false);
+			coordinator.relayAudio(agent, frame(6));
+			elapse(100);
+
+			assertThat(citizen.audio).containsExactly(frame(12), frame(6));
 		}
 
 		@Test
