@@ -218,6 +218,8 @@ MVP에서는 통화 중 상대 연결이 끊기면 통화를 끝냅니다 (민�
 | GET | `/api/v1/policy` | 웹 정책설정 화면 | 지금 정책 불러오기 |
 | PUT | `/api/v1/policy` | 웹 정책설정 화면 | 정책 저장 |
 | DELETE | `/api/v1/policy` | 웹 정책설정 화면 | 기본값으로 초기화 |
+| GET | `/api/v1/announcements` | 정책설정 화면 (앱·웹) | 안내 멘트 3종 목록 |
+| GET | `/api/v1/announcements/{kind}/audio` | 정책설정 화면 (앱·웹) | 안내 멘트 미리듣기 음성 (WAV) |
 
 ### mute-hold
 
@@ -242,6 +244,20 @@ MVP에서는 통화 중 상대 연결이 끊기면 통화를 끝냅니다 (민�
 - 세 API 모두 지금(저장한) 정책을 위 형식으로 돌려줍니다. PUT은 모든 필드 필수이며, 범위를 벗어나거나 필드가 빠지면 400이고 정책은 바뀌지 않습니다.
 - 게이트웨이는 정책 **하나**를 메모리에 둡니다 (MVP는 상담원 한 명, DB 없음). 처음과 서버 재시작 뒤에는 기본값(위 예시)입니다.
 - 웹이 다른 주소에서 브라우저로 부르므로 CORS를 모든 출처에 허용합니다 (인증 정보는 쓰지 않음).
+
+### announcements (미리듣기)
+
+```json
+[
+  { "kind": "ABUSE_NOTICE", "title": "폭언 안내", "text": "…", "when": "…", "durationMs": 7820, "audioUrl": "/api/v1/announcements/ABUSE_NOTICE/audio" },
+  { "kind": "AFTER_NOTICE", "title": "폭언 후 안내", "text": "…", "when": "…", "durationMs": 4080, "audioUrl": "/api/v1/announcements/AFTER_NOTICE/audio" },
+  { "kind": "SESSION_END", "title": "세션 종료", "text": "…", "when": "…", "durationMs": 2540, "audioUrl": "/api/v1/announcements/SESSION_END/audio" }
+]
+```
+
+- 정책설정 화면 '안내 멘트 설정'의 목록(`title`, `text`)과 미리듣기에 씁니다. 멘트는 게이트웨이가 가진 고정 3종이라 앱에서 바꾸지 않습니다.
+- `audioUrl`을 서버 주소에 붙여(`https://momin.tricocube.com` + `audioUrl`) 일반 미디어 플레이어로 재생합니다. 민원인에게 나가는 것과 같은 음성입니다 (WAV, 16kHz mono 16비트).
+- 없는 `kind`는 404. 브라우저에서 부를 수 있게 CORS를 정책 API와 같이 허용합니다.
 
 ## 7. Android 구현 가이드
 
