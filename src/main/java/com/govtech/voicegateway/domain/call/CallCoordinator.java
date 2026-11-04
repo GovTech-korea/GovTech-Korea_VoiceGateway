@@ -33,6 +33,7 @@ import com.govtech.voicegateway.domain.call.message.ServerMessage.CallEndReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.RingCancelReason;
 import com.govtech.voicegateway.domain.call.message.ServerMessage.StatusReason;
 import com.govtech.voicegateway.domain.emotion.EmotionAnalyzer;
+import com.govtech.voicegateway.domain.emotion.EmotionRequest;
 import com.govtech.voicegateway.domain.emotion.EmotionResult;
 import com.govtech.voicegateway.domain.protection.CallProtection;
 import com.govtech.voicegateway.domain.protection.KeywordRiskDetector;
@@ -665,8 +666,9 @@ public class CallCoordinator {
 			long endMs = startMs + pcm.length / (FRAME_BYTES / 20);
 			// 앞 발화 결과가 나온 뒤에 보낸다 (결과 순서가 바뀌면 격양이 이어진 시간이 틀어진다)
 			emotionTail = emotionTail
-					.thenCompose(ignored -> isConnected(call)
-							? emotionAnalyzer.analyze(pcm, transcript.text())
+					.thenCompose(ignored -> isConnected(call) // 격앙 누적 시간은 앞 발화 결과를 반영한 뒤 읽는다
+							? emotionAnalyzer.analyze(new EmotionRequest(call.callId, pcm, transcript.text(), startMs, endMs,
+									call.protection.agitationMs()))
 							: CompletableFuture.<EmotionResult>completedFuture(null))
 					.thenAccept(result -> {
 						if (result != null) {

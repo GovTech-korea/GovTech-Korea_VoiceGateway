@@ -964,6 +964,10 @@ class CallCoordinatorTest {
 			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).isEmpty();
 
 			speak(30, "기다리게 하는 거예요!");
+			assertThat(emotion.lastRequest.arousalDurationMs()).isEqualTo(600); // 앞 발화(30프레임)만큼 격앙이 이어졌다
+			assertThat(emotion.lastRequest.callId()).isEqualTo("call-1");
+			assertThat(emotion.lastRequest.endMs() - emotion.lastRequest.startMs()).isEqualTo(600);
+			assertThat(emotion.lastRequest.startMs()).isEqualTo(600); // 첫 발화(0~600ms) 바로 뒤
 
 			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).singleElement().satisfies(event -> {
 				assertThat(event.kind()).isEqualTo(CallProtection.EventKind.AGITATION);
