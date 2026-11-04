@@ -816,6 +816,41 @@ class CallCoordinatorTest {
 		}
 
 		@Test
+		@DisplayName("STT가 차단을 풀어도 재생 중인 안내는 끝까지 나간다")
+		void sttReleaseKeepsAnnouncement() {
+			elapse(0);
+			stt.listener("call-1").onHold(true);
+			stt.listener("call-1").onHold(false);
+			coordinator.relayAudio(agent, frame(6));
+			elapse(20);
+
+			assertThat(citizen.audio).containsExactly(frame(8), frame(9));
+		}
+
+		@Test
+		@DisplayName("폭언 안내 중 상담원이 REST로 차단을 풀면 안내를 멈추고 상담원 음성을 보낸다")
+		void agentReleaseStopsGreeting() {
+			elapse(0);
+			coordinator.holdMute("call-1", false);
+			coordinator.relayAudio(agent, frame(6));
+			elapse(100);
+
+			assertThat(citizen.audio).containsExactly(frame(8), frame(6));
+		}
+
+		@Test
+		@DisplayName("폭언 안내 중 허용 횟수에 닿으면 폭언 안내를 멈추고 폭언 후 안내를 처음부터 튼다")
+		void afterNoticeReplacesGreeting() {
+			elapse(0);
+			abuse();
+			abuse();
+			elapse(0);
+			elapse(20);
+
+			assertThat(citizen.audio).containsExactly(frame(8), frame(12), frame(14));
+		}
+
+		@Test
 		@DisplayName("폭언 안내 중 통화가 끝나면 안내를 멈춘다")
 		void greetingStopsOnHangup() {
 			elapse(0);

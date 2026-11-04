@@ -144,6 +144,7 @@ public class CallCoordinator {
 		if (muted.isPresent()) {
 			notifyHold(callId);
 			if (!hold) {
+				stopAnnouncement(callId); // 상담원이 바로 말할 수 있게 재생 중인 안내를 멈춘다
 				applyProtection(callId, CallProtection::falsePositive);
 			}
 		}
@@ -163,7 +164,6 @@ public class CallCoordinator {
 
 	/**
 	 * 민원인 음성 차단 유지를 켜거나 끈다. 켜 두는 동안 상담원에게는 무음만 간다 (STT에는 원본 그대로).
-	 * 끄면 민원인에게 재생 중인 차단 안내도 멈춰, 상담원이 바로 말할 수 있게 한다.
 	 *
 	 * @return 켤 때 새로 무음 처리한 대기 프레임 수 (끌 때는 0). 통화 중인 callId가 아니면 비어 있다
 	 */
@@ -175,9 +175,6 @@ public class CallCoordinator {
 		int muted = line.setHold(hold);
 		if (line.isClosed()) {
 			return OptionalInt.empty(); // 조회와 적용 사이에 통화가 끝났다
-		}
-		if (!hold) {
-			stopAnnouncement(callId);
 		}
 		log.info("음성 차단 유지 {}: {} (대기 프레임 {}개 무음)", hold ? "켜기" : "끄기", callId, muted);
 		return OptionalInt.of(muted);
@@ -288,15 +285,16 @@ public class CallCoordinator {
 			stt.accept(frame, receivedAt);
 			history.add(frame, receivedAt);
 		});
+		call.citizen.send(new ServerMessage.Connected(callId, Role.AGENT, 0));
+		agent.connection.send(new ServerMessage.Connected(callId, Role.CITIZEN, properties.delayMs()));
+		agent.connection.send(protectionState(call.protection.state()));
+		// 안내를 먼저 시작한 뒤 상담원 음성 경로를 연다 (그 사이 상담원 음성이 안내 전에 새어 나가지 않게)
+		play(call, announcements.abuseNotice(), "폭언 안내");
 		audioSinks.put(agent.connection.id(), frame -> {
 			if (!call.isAnnouncing()) { // 안내 음성과 섞이지 않게 그동안 상담원 음성은 버린다
 				call.citizen.sendAudio(frame);
 			}
 		});
-		call.citizen.send(new ServerMessage.Connected(callId, Role.AGENT, 0));
-		agent.connection.send(new ServerMessage.Connected(callId, Role.CITIZEN, properties.delayMs()));
-		agent.connection.send(protectionState(call.protection.state()));
-		play(call, announcements.abuseNotice(), "폭언 안내");
 		log.info("통화 연결: {} ↔ {}", callId, agent.agentId);
 	}
 
