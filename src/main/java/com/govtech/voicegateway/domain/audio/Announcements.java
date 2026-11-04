@@ -10,4 +10,12 @@ package com.govtech.voicegateway.domain.audio;
  */
 public record Announcements(Announcement riskHold, Announcement abuseNotice, Announcement afterNotice,
 		Announcement sessionEnd) {
+
+	public Announcement get(AnnouncementKind kind) {
+		return switch (kind) {
+			case ABUSE_NOTICE -> abuseNotice;
+			case AFTER_NOTICE -> afterNotice;
+			case SESSION_END -> sessionEnd;
+		};
+	}
 }
