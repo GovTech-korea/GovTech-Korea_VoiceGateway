@@ -835,8 +835,8 @@ public class CallCoordinator {
 			if (cleared || !isConnected(call)) {
 				return;
 			}
-			long startMs = sinceConnected(call, from);
 			long endMs = sinceConnected(call, to);
+			long startMs = Math.min(sinceConnected(call, from), endMs); // 시작을 모르면(null) 지금 시각이라 끝보다 늦을 수 있다
 			Optional<KeywordRiskDetector.Match> match = wholeUtterance ? riskDetector.detect(text, true)
 					: riskDetector.detectPart(text);
 			if (match.isPresent() && !match.get().reported()) {
@@ -844,7 +844,7 @@ public class CallCoordinator {
 				if (!suspected && !hold(key, id, text, holdFrom, abuse.riskType(), abuse.severity(), abuse.keyword())) {
 					return;
 				}
-				if (countsAsAbuse(from, to, abuse.riskType())) {
+				if (countsAsAbuse(from != null ? from : to, to, abuse.riskType())) {
 					applyProtection(call, protection -> protection.abuse(startMs, endMs, text, abuse.keyword()));
 				}
 			} else if (suspected) {

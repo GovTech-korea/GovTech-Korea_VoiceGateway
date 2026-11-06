@@ -150,6 +150,43 @@ class StreamingAsrStreamTest {
 	}
 
 	@Test
+	@DisplayName("앞 발화 final 전에 다음 발화가 시작돼 같은 id로 speech_start가 다시 오면 다음 발화의 시작으로 본다")
+	void repeatedSpeechStartBelongsToNextUtterance() throws Exception {
+		StreamingAsrStream stream = new StreamingAsrStream("call-1", URI_, listener, json, client);
+		for (int i = 0; i < 200; i++) {
+			stream.send(chunk(i, 10_000 + i * 20L));
+		}
+		awaitDelivered(stream, 10_000 + 199 * 20L);
+
+		stream.handle(json.readTree("{\"type\":\"speech_start\",\"id\":4,\"audio_start\":1.0}"));
+		stream.handle(json.readTree("{\"type\":\"speech_start\",\"id\":4,\"audio_start\":3.0}")); // 쉬지 않고 이어 말함
+		stream.handle(json.readTree("{\"type\":\"final\",\"id\":4,\"text\":\"이 새끼야\"}"));
+		stream.handle(json.readTree("{\"type\":\"partial\",\"id\":5,\"text\":\"씨발\"}"));
+
+		assertThat(transcripts).containsExactly(
+				new SttTranscript("call-1-4", "이 새끼야", true, 10_000 + 50 * 20L, 10_000 + 199 * 20L),
+				new SttTranscript("call-1-5", "씨발", false, 10_000 + 150 * 20L, 10_000 + 199 * 20L));
+	}
+
+	@Test
+	@DisplayName("STT 오류로 final 없이 같은 id를 이어 쓰면 남은 시작을 버려 다음 발화가 앞 발화의 시작을 받지 않는다")
+	void errorClearsUtteranceStarts() throws Exception {
+		StreamingAsrStream stream = new StreamingAsrStream("call-1", URI_, listener, json, client);
+		for (int i = 0; i < 200; i++) {
+			stream.send(chunk(i, 10_000 + i * 20L));
+		}
+		awaitDelivered(stream, 10_000 + 199 * 20L);
+
+		stream.handle(json.readTree("{\"type\":\"speech_start\",\"id\":2,\"audio_start\":1.0}"));
+		stream.handle(json.readTree("{\"type\":\"error\",\"id\":2,\"message\":\"decode failed\"}"));
+		stream.handle(json.readTree("{\"type\":\"speech_start\",\"id\":2,\"audio_start\":3.0}"));
+		stream.handle(json.readTree("{\"type\":\"partial\",\"id\":2,\"text\":\"네\"}"));
+
+		assertThat(transcripts).containsExactly(
+				new SttTranscript("call-1-2", "네", false, 10_000 + 150 * 20L, 10_000 + 199 * 20L));
+	}
+
+	@Test
 	@DisplayName("speech_start 없이 온 자막은 시작 시각을 모르는 것으로 넘기고, discard·error·모르는 메시지는 무시한다")
 	void unknownStartAndIgnored() throws Exception {
 		StreamingAsrStream stream = new StreamingAsrStream("call-1", URI_, listener, json, client);
