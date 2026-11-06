@@ -1,6 +1,7 @@
 package com.govtech.voicegateway.global.config;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.DisplayName;
@@ -26,5 +27,16 @@ class TestConsoleDisabledTest {
 		mockMvc.perform(get("/test")).andExpect(status().isNotFound());
 		mockMvc.perform(get("/api/v1/status")).andExpect(status().isNotFound());
 		mockMvc.perform(get("/api/v1/stt/recordings")).andExpect(status().isNotFound());
+	}
+
+	@Test
+	@DisplayName("테스트 콘솔을 꺼도 운영 상담사 웹(/ops)과 그 화면이 쓰는 API는 열려 있다")
+	void opsConsoleStaysOn() throws Exception {
+		mockMvc.perform(get("/ops")).andExpect(redirectedUrl("/ops/index.html"));
+		for (String file : new String[] { "index.html", "ops.js", "ops.css", "img/app-icon.png", "img/favicon.png" }) {
+			mockMvc.perform(get("/ops/" + file)).andExpect(status().isOk());
+		}
+		mockMvc.perform(get("/api/v1/policy")).andExpect(status().isOk());
+		mockMvc.perform(get("/api/v1/announcements")).andExpect(status().isOk());
 	}
 }
