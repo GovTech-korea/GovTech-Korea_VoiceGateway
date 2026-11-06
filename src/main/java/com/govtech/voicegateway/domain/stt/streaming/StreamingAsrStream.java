@@ -269,13 +269,22 @@ final class StreamingAsrStream implements SttStream {
 			}
 			case "speech_start" -> {
 				long frame = Math.round(message.path("audio_start").asDouble(0) * 1000 / FRAME_MS);
-				utteranceStartFrame.put(message.path("id").asInt(), frame);
+				int id = message.path("id").asInt();
+				// 앞 발화의 final이 나오기 전에 다음 발화가 시작되면 서버가 앞 발화 id로 보낸다: 이미 시작한 발화면 다음 발화의 시작이다
+				while (utteranceStartFrame.containsKey(id)) {
+					id++;
+				}
+				utteranceStartFrame.put(id, frame);
 			}
 			case "partial", "final" -> transcript(message, type.equals("final"));
 			case "discard" -> utteranceStartFrame.remove(message.path("id").asInt());
 			case "risk" -> risk(message);
 			case "hold" -> listener.onHold(message.path("on").asBoolean(false));
-			case "error" -> log.warn("STT 서버 오류: {} {}", callId, message.path("message").asString(""));
+			case "error" -> {
+				log.warn("STT 서버 오류: {} {}", callId, message.path("message").asString(""));
+				// 오류가 나면 서버는 final·discard 없이 같은 id를 이어 쓴다: 남은 시작을 두면 다음 발화들이 한 칸씩 밀린다
+				utteranceStartFrame.clear();
+			}
 			default -> log.debug("모르는 STT 메시지 무시: {} {}", callId, type);
 		}
 	}

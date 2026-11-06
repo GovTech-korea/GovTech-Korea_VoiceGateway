@@ -538,6 +538,18 @@ class CallCoordinatorTest {
 					.satisfies(m -> assertThat(((ServerMessage.RiskDetected) m).mutedFrames()).isEqualTo(1));
 		}
 
+		@Test
+		@DisplayName("발화 시작 시각을 모르면 폭언 기록의 시작을 끝보다 늦게 적지 않는다 (자막은 음성보다 늦게 온다)")
+		void abuseWithoutStartKeepsTimeOrder() {
+			long heard = clock.millis();
+			clock.advance(Duration.ofMillis(600));
+
+			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "이 병신아", true, null, heard));
+
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).singleElement()
+					.satisfies(e -> assertThat(e.startMs()).isEqualTo(e.endMs()));
+		}
+
 				@Test
 		@DisplayName("폭언 의심은 발화가 끝날 때까지 막고, 상담원을 향한 욕으로 판단하면 센 뒤 자동으로 풀어 다음 말은 들린다")
 		void suspectedAbuseHoldsUntilJudged() {
