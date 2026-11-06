@@ -202,6 +202,17 @@ th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line
 th { color: var(--muted); font-weight: 600; font-size: 12px; }
 td.empty { color: var(--muted); }
 
+/* ---------- 감정 테스트 ---------- */
+
+#emotion-form input[type=file] { flex: 1; }
+.emotion-table { margin-top: 10px; }
+.emotion-bar { display: inline-block; width: 120px; height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; vertical-align: middle; }
+.emotion-bar i { display: block; height: 100%; background: var(--ok); }
+.emotion-bar.hot i { background: var(--danger); }
+td.emotion-hot { color: var(--danger); font-weight: 700; }
+td.emotion-calm { color: var(--ok); font-weight: 700; }
+td.emotion-mock { color: var(--danger); }
+
 .mono { font-family: var(--mono); font-size: 13px; margin: 0; word-break: break-all; }
 
 /* ---------- STT 서버 ---------- */

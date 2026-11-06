@@ -39,6 +39,7 @@ class MockEmotionAnalyzerTest {
 
 		assertThat(result.agitated()).isTrue();
 		assertThat(result.score()).isBetween(70, 100);
+		assertThat(result.source()).isEqualTo(EmotionResult.Source.MOCK); // 감정 API 대신 판단했다는 표시
 	}
 
 	@Test

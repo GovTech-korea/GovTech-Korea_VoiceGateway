@@ -1,6 +1,7 @@
 package com.govtech.voicegateway.global.config;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(properties = "voicegateway.test-console.enabled=false")
@@ -27,6 +29,8 @@ class TestConsoleDisabledTest {
 		mockMvc.perform(get("/test")).andExpect(status().isNotFound());
 		mockMvc.perform(get("/api/v1/status")).andExpect(status().isNotFound());
 		mockMvc.perform(get("/api/v1/stt/recordings")).andExpect(status().isNotFound());
+		mockMvc.perform(post("/api/v1/emotion/analyze").contentType(MediaType.APPLICATION_OCTET_STREAM).content(new byte[640]))
+				.andExpect(status().isNotFound());
 	}
 
 	@Test

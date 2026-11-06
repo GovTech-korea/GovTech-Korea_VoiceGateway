@@ -1193,6 +1193,136 @@ if ($('stt-form')) {
 	};
 }
 
+// ---------- 감정 테스트 ----------
+
+const EMOTION_SILENCE_RMS = 0.018 * 0x8000; // 약 -35dBFS 아래는 쉬는 소리로 본다
+const EMOTION_GAP_FRAMES = 30; // 0.6초 이상 쉬면 다음 발화
+const EMOTION_MIN_FRAMES = 15; // 0.3초보다 짧은 소리는 버린다
+const EMOTION_MAX_FRAMES = 3000; // 한 구간 최대 60초 (게이트웨이 한도)
+
+/** 16kHz 샘플을 무음 기준으로 발화 구간 [시작 프레임, 끝 프레임)들로 나눈다 */
+function splitUtterances(samples) {
+	const frames = Math.floor(samples.length / FRAME_SAMPLES);
+	const voiced = [];
+	for (let f = 0; f < frames; f++) {
+		let sum = 0;
+		for (let i = f * FRAME_SAMPLES; i < (f + 1) * FRAME_SAMPLES; i++) sum += samples[i] * samples[i];
+		voiced.push(Math.sqrt(sum / FRAME_SAMPLES) > EMOTION_SILENCE_RMS);
+	}
+	const utterances = [];
+	let start = -1;
+	let last = -1;
+	for (let f = 0; f <= frames; f++) {
+		if (f < frames && voiced[f]) {
+			if (start < 0) start = f;
+			last = f;
+		} else if (start >= 0 && (f === frames || f - last > EMOTION_GAP_FRAMES)) {
+			utterances.push([start, last + 1]);
+			start = -1;
+		}
+	}
+	// 짧게 쉬며 1분 넘게 이어 말한 발화는 60초씩 자른다 (서버 한도). 너무 짧은 조각은 버린다
+	const segments = [];
+	for (const [from, to] of utterances) {
+		for (let a = from; a < to; a += EMOTION_MAX_FRAMES) {
+			const b = Math.min(to, a + EMOTION_MAX_FRAMES);
+			if (b - a >= EMOTION_MIN_FRAMES) segments.push([a, b]);
+		}
+	}
+	return segments;
+}
+
+/** 구간 소리를 들어 본다 */
+function playSamples(samples) {
+	const ctx = context();
+	const buffer = ctx.createBuffer(1, samples.length, SAMPLE_RATE);
+	const data = buffer.getChannelData(0);
+	for (let i = 0; i < samples.length; i++) data[i] = samples[i] / 0x8000;
+	const source = ctx.createBufferSource();
+	source.buffer = buffer;
+	source.connect(ctx.destination);
+	source.start();
+}
+
+function seconds(frames) {
+	return (frames * 0.02).toFixed(1);
+}
+
+/**
+ * 파일을 발화 구간으로 나눠 차례로 감정 판단에 보낸다. 격양 누적 시간은 통화처럼 격양이 이어지면 더하고 아니면 0으로 돌린다.
+ */
+async function runEmotionTest() {
+	const file = $('emotion-file').files[0];
+	const summary = $('emotion-summary');
+	const rows = $('emotion-rows');
+	if (!file) {
+		summary.textContent = '먼저 음원 파일을 고르세요.';
+		return;
+	}
+	$('emotion-run').disabled = true;
+	rows.innerHTML = '';
+	document.querySelector('.emotion-table').hidden = true;
+	try {
+		summary.textContent = '파일을 16kHz로 바꾸는 중…';
+		const samples = await fileSamples(file);
+		const segments = splitUtterances(samples);
+		if (!segments.length) {
+			summary.textContent = '발화를 찾지 못했습니다 (소리가 너무 작거나 비어 있음).';
+			return;
+		}
+		document.querySelector('.emotion-table').hidden = false;
+		let arousalMs = 0;
+		let agitatedCount = 0;
+		let mockCount = 0;
+		for (let n = 0; n < segments.length; n++) {
+			const [from, to] = segments[n];
+			const part = samples.subarray(from * FRAME_SAMPLES, to * FRAME_SAMPLES);
+			summary.textContent = `${segments.length}개 구간 중 ${n + 1}번째 판단 중…`;
+			const res = await fetch(`/api/v1/emotion/analyze?startMs=${from * 20}&arousalDurationMs=${arousalMs}`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/octet-stream' },
+				body: frameOf(part),
+			});
+			if (!res.ok) throw new Error(`${n + 1}번째 구간 HTTP ${res.status}`);
+			const r = await res.json();
+			if (r.engine === 'MOCK') mockCount++;
+			arousalMs = r.agitated ? arousalMs + (to - from) * 20 : 0;
+			if (r.agitated) agitatedCount++;
+			const tr = document.createElement('tr');
+			tr.append(cell(String(n + 1)), cell(`${seconds(from)}초 ~ ${seconds(to)}초`, 'mono'));
+			const score = document.createElement('td');
+			score.innerHTML = '<span class="emotion-bar"><i></i></span>';
+			score.querySelector('i').style.width = `${r.score}%`;
+			score.querySelector('.emotion-bar').classList.toggle('hot', r.agitated);
+			score.append(` ${r.score}점`);
+			const verdict = cell(r.agitated ? '격양' : '안정', r.agitated ? 'emotion-hot' : 'emotion-calm');
+			const play = document.createElement('td');
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.textContent = '▶ 듣기';
+			button.onclick = () => playSamples(part);
+			play.append(button);
+			tr.append(score, verdict, cell(`${(arousalMs / 1000).toFixed(1)}초`, 'mono'),
+				cell(r.engine === 'API' ? '감정 API' : '목업', r.engine === 'API' ? '' : 'emotion-mock'), play);
+			rows.append(tr);
+		}
+		const by = mockCount === 0 ? '전부 STT 서버 감정 API'
+			: mockCount === segments.length ? '전부 목업 (감정 API 주소가 없거나 응답 실패)' : `${mockCount}개 구간은 감정 API 실패로 목업`;
+		summary.textContent = `${segments.length}개 구간 중 격양 ${agitatedCount}개 · 격양 기준 70점 이상 · 판단: ${by}`;
+	} catch (e) {
+		summary.textContent = `감정 테스트 실패: ${e.message}`;
+	} finally {
+		$('emotion-run').disabled = false;
+	}
+}
+
+if ($('emotion-form')) {
+	$('emotion-form').addEventListener('submit', (e) => {
+		e.preventDefault();
+		runEmotionTest();
+	});
+}
+
 // 앱 화면 상단 상태바 시각
 (function statusBarClock() {
 	const now = new Date();

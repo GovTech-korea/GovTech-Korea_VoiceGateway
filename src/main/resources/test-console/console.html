@@ -163,6 +163,23 @@
 		</div>
 		<div id="status-dumps" class="dumps"></div>
 	</section>
+
+	<!-- 감정 테스트 -->
+	<section class="panel" id="emotion-panel">
+		<div class="panel-head">
+			<h2>감정 테스트</h2>
+			<span class="hint">음원 파일을 무음으로 발화 구간을 나눠 통화와 같은 감정 판단에 넣는다</span>
+		</div>
+		<form class="row" id="emotion-form">
+			<input type="file" id="emotion-file" accept="audio/*,.wav,.mp3,.m4a" aria-label="감정 테스트 음원 파일">
+			<button type="submit" class="primary" id="emotion-run">분석</button>
+		</form>
+		<p class="hint" id="emotion-summary">WAV·MP3·M4A 등 브라우저가 읽을 수 있는 파일. 0.6초 이상 쉬면 다음 발화로 나눈다 (구간당 최대 60초).</p>
+		<table class="emotion-table" hidden>
+			<thead><tr><th>#</th><th>구간</th><th>점수</th><th>판정</th><th>격양 누적</th><th>판단</th><th></th></tr></thead>
+			<tbody id="emotion-rows"></tbody>
+		</table>
+	</section>
 </main>
 
 <script src="console.js"></script>
