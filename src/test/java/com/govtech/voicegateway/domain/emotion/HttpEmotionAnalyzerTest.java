@@ -84,6 +84,9 @@ class HttpEmotionAnalyzerTest {
 		response = "{\"state\":\"안정\",\"arousal_score\":90}";
 		assertThat(analyzer().analyze(request()).join().agitated()).isFalse();
 
+		response = "{\"state\":\"경고\",\"arousal_score\":0,\"emotional_arousal_duration\":0}";
+		assertThat(analyzer().analyze(request()).join().agitated()).isFalse(); // 조용해서 서버가 상태만 유지
+
 		response = "{\"state\":\"음소거\",\"arousal_score\":0,\"emotional_arousal_duration\":1500}";
 		EmotionResult muted = analyzer().analyze(request()).join();
 		assertThat(muted.agitated()).isFalse();
