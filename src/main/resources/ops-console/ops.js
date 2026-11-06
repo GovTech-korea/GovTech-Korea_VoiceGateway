@@ -174,7 +174,8 @@ function setAgentState(state) {
 	agent.state = state;
 	body.dataset.agent = state;
 	$('state-text').textContent = STATE_TEXT[state] || state;
-	if (!agent.callId) {
+	// 끝난 통화의 '통화 종료 · 사유'는 다음 전화가 올 때까지 남겨 둔다 (상태는 위쪽 상태 버튼에 보인다)
+	if (!agent.callId && body.dataset.call !== 'ended') {
 		$('call-state-text').textContent = state === 'AWAY' ? '이석중' : '상담 대기';
 	}
 }
@@ -509,6 +510,7 @@ async function loadPolicySummary() {
 		const p = await fetchPolicy();
 		if (agent.callId) return; // 진행 중인 통화는 연결 때의 정책을 끝까지 쓴다
 		renderSummary(p);
+		if (body.dataset.call === 'ended') return; // 끝난 통화의 카운터는 다음 통화가 연결될 때까지 남겨 둔다
 		// 통화 전에는 카운터 분모를 지금 정책으로 보여 준다 (통화가 연결되면 protection-state가 덮어쓴다)
 		showCounters({ abuseCount: 0, abuseLimit: p.abuseLimit, afterNoticeCount: 0,
 			afterNoticeLimit: p.afterNotice === 'IMMEDIATE' ? 1 : p.afterNoticeLimit,
