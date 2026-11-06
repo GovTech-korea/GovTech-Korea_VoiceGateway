@@ -102,7 +102,28 @@ class EmotionTestControllerTest {
 							.contentType(MediaType.APPLICATION_OCTET_STREAM).content(new byte[640]))
 					.andExpect(status().isBadRequest());
 		}
+		mockMvc.perform(post("/api/v1/emotion/analyze").param("session", "a b/../c")
+						.contentType(MediaType.APPLICATION_OCTET_STREAM).content(new byte[640]))
+				.andExpect(status().isBadRequest());
 		verifyNoInteractions(emotionAnalyzer);
+	}
+
+	@Test
+	@DisplayName("시험 id를 주면 감정 판단 단위가 시험마다 달라지고, 응답에 판정 상태가 온다")
+	void sessionMakesCallId() throws Exception {
+		given(emotionAnalyzer.analyze(any())).willReturn(
+				CompletableFuture.completedFuture(EmotionResult.ofState(40, "경고", 500)));
+
+		MvcResult pending = mockMvc.perform(post("/api/v1/emotion/analyze").param("session", "3f2a-01")
+						.contentType(MediaType.APPLICATION_OCTET_STREAM).content(new byte[640]))
+				.andReturn();
+
+		mockMvc.perform(asyncDispatch(pending))
+				.andExpect(jsonPath("$.state").value("경고"))
+				.andExpect(jsonPath("$.agitated").value(true));
+		ArgumentCaptor<EmotionRequest> sent = ArgumentCaptor.forClass(EmotionRequest.class);
+		verify(emotionAnalyzer).analyze(sent.capture());
+		assertThat(sent.getValue().callId()).isEqualTo("console-emotion-test-3f2a-01");
 	}
 
 	@Test

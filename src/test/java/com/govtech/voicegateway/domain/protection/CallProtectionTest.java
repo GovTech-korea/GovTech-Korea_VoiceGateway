@@ -138,4 +138,17 @@ class CallProtectionTest {
 		assertThat(protection.falsePositive().events()).isEmpty();
 		assertThat(protection.state().abuseCount()).isEqualTo(1);
 	}
+
+	@Test
+	@DisplayName("0.5초마다 같은 자막이 오거나 자막이 이어 붙어도 격양 기록에는 겹치지 않게 남는다")
+	void agitationTextsDoNotRepeat() {
+		CallProtection protection = protection(5, AfterNotice.COUNT, 2, 2);
+		protection.emotion(true, 0, 500, 500, "빨리");
+		protection.emotion(true, 500, 1_000, 500, "빨리 처리해");
+		protection.emotion(true, 1_000, 1_500, 500, "빨리 처리해");
+		CallProtection.Result result = protection.emotion(true, 1_500, 2_000, 500, "다른 말");
+
+		assertThat(result.events()).singleElement()
+				.satisfies(event -> assertThat(event.text()).isEqualTo("빨리 처리해 다른 말"));
+	}
 }

@@ -3,6 +3,7 @@ package com.govtech.voicegateway.domain.emotion.api;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Pattern;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
 import org.springframework.http.HttpStatus;
@@ -28,8 +29,10 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class EmotionTestController {
 
-	/** 콘솔에서 보낸 구간이라는 표시 (STT 서버 로그에서 통화와 구분) */
+	/** 콘솔에서 보낸 구간이라는 표시 (STT 서버 로그에서 통화와 구분). 뒤에 콘솔이 고른 시험 id가 붙는다 */
 	static final String CALL_ID = "console-emotion-test";
+	/** 콘솔이 파일마다 만드는 시험 id (감정 API가 이 id별로 화자 기준선을 잡는다) */
+	private static final Pattern SESSION = Pattern.compile("[A-Za-z0-9-]{1,64}");
 	/** 발화 하나로 받는 최대 길이: 16kHz PCM16 60초 */
 	static final int MAX_BYTES = 16_000 * 2 * 60;
 	/** 파일 안 시각 상한 (24시간). 넘으면 끝 시각 계산이 넘칠 수 있다 */
@@ -43,12 +46,17 @@ public class EmotionTestController {
 	 * @param startMs           파일 처음부터 잰 구간 시작 (ms)
 	 * @param arousalDurationMs 이 구간 전까지 격양이 이어진 시간 (ms). 통화에서는 게이트웨이가 센다
 	 * @param text              발화 문장 (목업 판단에 쓴다, 없어도 됨)
+	 * @param session           시험 id. 같은 파일의 구간은 같은 id로 시간 순서대로 보낸다 (감정 API가 이어 붙여 판정)
 	 */
 	@PostMapping(path = "/api/v1/emotion/analyze", consumes = MediaType.APPLICATION_OCTET_STREAM_VALUE)
 	public CompletableFuture<EmotionTestResponse> analyze(HttpServletRequest request,
 			@RequestParam(defaultValue = "0") long startMs,
 			@RequestParam(defaultValue = "0") long arousalDurationMs,
-			@RequestParam(required = false) String text) throws IOException {
+			@RequestParam(required = false) String text,
+			@RequestParam(required = false) String session) throws IOException {
+		if (session != null && !SESSION.matcher(session).matches()) {
+			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "session은 영문·숫자·- 64자 이하여야 합니다");
+		}
 		if (startMs < 0 || startMs > MAX_MS || arousalDurationMs < 0 || arousalDurationMs > MAX_MS) {
 			throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "startMs, arousalDurationMs는 0 이상 24시간 이하여야 합니다");
 		}
@@ -58,7 +66,7 @@ public class EmotionTestController {
 					"음성은 PCM16 16kHz 모노여야 합니다 (받은 크기: " + pcm.length + "바이트)");
 		}
 		long endMs = startMs + pcm.length / 32; // 16kHz PCM16: 1ms = 32바이트
-		return emotionAnalyzer.analyze(new EmotionRequest(CALL_ID, pcm, text == null ? "" : text, startMs, endMs, arousalDurationMs))
+		return emotionAnalyzer.analyze(new EmotionRequest(session == null ? CALL_ID : CALL_ID + "-" + session, pcm, text == null ? "" : text, startMs, endMs, arousalDurationMs))
 				.thenApply(result -> EmotionTestResponse.of(result, startMs, endMs, emotionProperties));
 	}
 

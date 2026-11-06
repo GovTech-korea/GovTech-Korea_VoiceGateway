@@ -49,7 +49,7 @@ class HttpEmotionAnalyzerTest {
 
 	private HttpEmotionAnalyzer analyzer() {
 		URI url = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/v1/acoustic-arousal");
-		return new HttpEmotionAnalyzer(url, 70, Duration.ofSeconds(2), FALLBACK);
+		return new HttpEmotionAnalyzer(url, Duration.ofSeconds(2), FALLBACK);
 	}
 
 	private static EmotionRequest request() {
@@ -57,11 +57,11 @@ class HttpEmotionAnalyzerTest {
 	}
 
 	@Test
-	@DisplayName("발화 PCM과 구간·격앙 누적 시간을 multipart로 보내고 arousal_score를 점수로 쓴다")
+	@DisplayName("구간 PCM과 구간·격앙 누적 시간을 multipart로 보내고, 서버 상태가 경고면 격양으로 본다")
 	void sendsMultipartAndReadsScore() {
 		EmotionResult result = analyzer().analyze(request()).join();
 
-		assertThat(result).isEqualTo(new EmotionResult(82, true));
+		assertThat(result).isEqualTo(new EmotionResult(82, true, EmotionResult.Source.API, "경고", -1));
 		assertThat(contentType.get()).startsWith("multipart/form-data; boundary=");
 		String sent = new String(body.get(), StandardCharsets.ISO_8859_1);
 		assertThat(sent).contains(
@@ -76,11 +76,18 @@ class HttpEmotionAnalyzerTest {
 	}
 
 	@Test
-	@DisplayName("기준 점수 미만이면 격양이 아니다")
-	void belowThreshold() {
-		response = "{\"state\":\"안정\",\"arousal_score\":35}";
+	@DisplayName("격양 여부는 점수가 아니라 서버가 판정한 상태로 정한다 (격앙은 격양, 점수가 높아도 안정은 안정)")
+	void agitatedByState() {
+		response = "{\"state\":\"격앙\",\"arousal_score\":35}";
+		assertThat(analyzer().analyze(request()).join().agitated()).isTrue();
 
-		assertThat(analyzer().analyze(request()).join()).isEqualTo(new EmotionResult(35, false));
+		response = "{\"state\":\"안정\",\"arousal_score\":90}";
+		assertThat(analyzer().analyze(request()).join().agitated()).isFalse();
+
+		response = "{\"state\":\"음소거\",\"arousal_score\":0,\"emotional_arousal_duration\":1500}";
+		EmotionResult muted = analyzer().analyze(request()).join();
+		assertThat(muted.agitated()).isFalse();
+		assertThat(muted.runMs()).isEqualTo(1500);
 	}
 
 	@Test
@@ -116,7 +123,7 @@ class HttpEmotionAnalyzerTest {
 		});
 		URI url = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/slow");
 
-		EmotionResult result = new HttpEmotionAnalyzer(url, 70, Duration.ofMillis(200), FALLBACK).analyze(request()).join();
+		EmotionResult result = new HttpEmotionAnalyzer(url, Duration.ofMillis(200), FALLBACK).analyze(request()).join();
 
 		assertThat(result).isEqualTo(new EmotionResult(11, false));
 	}

@@ -26,8 +26,8 @@ public class EmotionConfig {
 			log.info("감정 분석: 목업 (격양 기준 {}점)", properties.agitatedScore());
 			return mock;
 		}
-		log.info("감정 분석: {} (격양 기준 {}점, 실패하면 목업)", properties.url(), properties.agitatedScore());
-		return new HttpEmotionAnalyzer(properties.url(), properties.agitatedScore(),
+		log.info("감정 분석: {} (상태 경고·격앙이면 격양, 실패하면 목업)", properties.url());
+		return new HttpEmotionAnalyzer(properties.url(),
 				Duration.ofMillis(properties.timeoutMs()), mock);
 	}
 }
