@@ -34,7 +34,7 @@ public class KeywordRiskDetector {
 	/**
 	 * 찾은 표현과 그 유형·위험도 (MOMIN 보호 판단 모델의 값).
 	 *
-	 * @param reported 찾은 표현이 모두 남이 한 말을 전하는 꼴이다 (제3자 발언). 최종 결과에서만 판단하고, 중간 결과는 늘 false
+	 * @param reported 찾은 표현이 모두 남이 한 말을 전하는 꼴이다 (제3자 발언). 최종 결과와 {@link #detectPart 부분 판단}에서만 보고, 중간 결과는 늘 false
 	 */
 	public record Match(String keyword, String riskType, String severity, boolean reported) {
 	}
@@ -148,6 +148,18 @@ public class KeywordRiskDetector {
 
 	/** isFinal이 false인 중간 결과에서는 잘린 위치 때문에 틀리기 쉬운 규칙을 건너뛴다 */
 	public Optional<Match> detect(String text, boolean isFinal) {
+		return detect(text, isFinal, isFinal);
+	}
+
+	/**
+	 * 발화가 끝나기 전에 판단하는 부분 (중간 결과의 일부). 남의 말을 전하는 꼴인지는 보지만,
+	 * 발화 전체를 봐야 하는 규칙({@link #I_SAEKKI})은 건너뛴다.
+	 */
+	public Optional<Match> detectPart(String text) {
+		return detect(text, false, true);
+	}
+
+	private Optional<Match> detect(String text, boolean wholeUtterance, boolean judgeReported) {
 		if (text == null || text.isBlank()) {
 			return Optional.empty();
 		}
@@ -158,12 +170,12 @@ public class KeywordRiskDetector {
 		String compact = cleaned.replaceAll("\\s+", "");
 		String spaced = cleaned;
 				List<Rule> matched = rules.stream()
-				.filter(rule -> isFinal || !rule.finalOnly())
+				.filter(rule -> wholeUtterance || !rule.finalOnly())
 				.filter(rule -> rule.matches(rule.ignoreSpaces() ? compact : spaced))
 				.toList();
 		// 인용이 아닌 욕이 하나라도 있으면 그것을 알린다. 위협은 "죽인다고!"처럼 직접 하는 말에도 인용 어미가 붙어 인용으로 보지 않는다
 		for (Rule rule : matched) {
-			boolean reported = isFinal && rule.riskType().equals("ABUSE")
+			boolean reported = judgeReported && rule.riskType().equals("ABUSE")
 					&& rule.allReported(rule.ignoreSpaces() ? compact : spaced);
 			if (!reported) {
 				return Optional.of(new Match(rule.keyword(), rule.riskType(), rule.severity(), false));

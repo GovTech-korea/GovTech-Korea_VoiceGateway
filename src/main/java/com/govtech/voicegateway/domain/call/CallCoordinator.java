@@ -69,8 +69,16 @@ public class CallCoordinator {
 	static final int HISTORY_FRAMES = 1500;
 	/** '세션 종료' 멘트가 앱에서 끝까지 재생되도록 멘트 길이보다 조금 더 기다렸다가 끊는다 */
 		static final long TERMINATE_MARGIN_MS = 500;
-	/** 폭언 의심 뒤 최종 결과가 이 시간 안에 오지 않으면 (STT가 발화를 버리거나 끊김) 의심을 거둔다 */
-	static final long SUSPECT_TIMEOUT_MS = 15_000;
+	/**
+	 * 말하는 도중 욕설이 보이면 뒤에 이어지는 말(인용 어미 등)을 이만큼 더 듣고, 발화가 끝나지 않았어도 판단한다.
+	 * 쉬지 않고 이어 말하면 STT가 발화를 수십 초 동안 끝내지 않아 최종 결과만 기다리면 폭언을 셀 수 없다.
+	 */
+	static final long JUDGE_DELAY_MS = 1_500;
+	/**
+	 * 발화 중간에 판단한 뒤 이어진 부분은 판단한 부분 끝보다 이만큼 앞의 음성부터 막는다.
+	 * 자막은 음성보다 늦게 나오므로, 판단할 때 자막에 아직 안 나온 다음 욕의 음성이 그 앞에 들어 있을 수 있다.
+	 */
+	static final long NEXT_PART_LEAD_MS = 1_000;
 
 	private final VoiceGatewayProperties properties;
 	private final RingTimer ringTimer;
@@ -682,10 +690,10 @@ public class CallCoordinator {
 
 	/**
 	 * 통화 하나의 STT 결과 처리 (STT 연결 스레드에서 불린다).
-	 * 자막은 상담원에게 보내고, 욕설이 보이면 발화 중이라도 바로 그 발화 시작부터 아직 상담원에게 나가지 않은 부분을 지우고
-	 * 차단 유지를 켠다 (폭언 의심). 발화가 끝나면 최종 결과로 판단한다: 상담원을 향한 욕이면 폭언 1회로 세고,
-	 * 남이 한 욕을 전하는 말이거나 최종 결과에 욕이 없으면 오탐지로 자동 해제한다 (횟수 그대로).
-	 * 발화 시작 시각을 모르면 대기 중인 음성 전부를 지운다.
+	 * 자막은 상담원에게 보내고, 욕설이 보이면 발화 중이라도 바로 그 부분 시작부터 아직 상담원에게 나가지 않은 음성을 지우고
+	 * 차단 유지를 켠다 (폭언 의심). {@link #JUDGE_DELAY_MS} 뒤 마지막 중간 결과로, 그 전에 발화가 끝나면 최종 결과로 판단한다:
+	 * 상담원을 향한 욕이면 폭언 1회로 세고, 남이 한 욕을 전하는 말이거나 욕이 사라졌으면 오탐지로 자동 해제한다 (횟수 그대로).
+	 * 판단한 뒤 같은 발화에 이어진 말은 새 부분으로 다시 본다. 발화 시작 시각을 모르면 대기 중인 음성 전부를 지운다.
 	 */
 	private final class CallSttListener implements SttListener {
 
@@ -698,6 +706,15 @@ public class CallCoordinator {
 		private CompletableFuture<Void> emotionTail = CompletableFuture.completedFuture(null);
 		/** 마지막으로 센 폭언이 끝난 시각 (잠금 안에서만 쓴다) */
 		private Long lastAbuseToMs;
+		// 발화가 끝나기 전에 판단한 앞부분 (발화 id별, 잠금 안에서만 쓴다)
+		/** 판단을 마친 자막의 글자 수 (띄어쓰기·문장부호는 STT가 고쳐 쓰므로 빼고 센다) */
+		private final Map<String, Integer> judgedLetters = new HashMap<>();
+		/** 판단을 마친 부분이 끝난 시각. 이어지는 부분은 이 뒤부터 */
+		private final Map<String, Long> judgedToMs = new HashMap<>();
+		/** 판단을 기다리는 발화의 마지막 중간 결과 */
+		private final Map<String, SttTranscript> lastPartial = new HashMap<>();
+		/** 욕에서 끝난 중간 결과라 판단을 한 번 미룬 부분 (인용 어미가 늦게 나올 수 있다) */
+		private final Set<String> deferred = new HashSet<>();
 
 		private CallSttListener(Call call, ClientConnection agentConnection) {
 			this.call = call;
@@ -712,71 +729,161 @@ public class CallCoordinator {
 			}
 			sendIfConnected(call, agentConnection, new ServerMessage.Transcript(call.callId, transcript.utteranceId(),
 					transcript.text(), transcript.isFinal()));
-			Optional<KeywordRiskDetector.Match> match = riskDetector.detect(transcript.text(), transcript.isFinal());
 			if (transcript.isFinal()) {
-				judge(transcript, match);
+				judgeFinal(transcript);
 				analyzeEmotion(transcript);
 			} else {
-				match.ifPresent(m -> suspect(transcript, m));
+				suspect(transcript);
 			}
 		}
 
-		/** 말하는 도중 욕설이 보였다: 판단은 발화가 끝난 뒤로 미루고 일단 막는다 */
-		private void suspect(SttTranscript transcript, KeywordRiskDetector.Match match) {
+		/** 말하는 도중 욕설이 보였다: 일단 막고, 뒤에 이어지는 말을 조금 더 들은 뒤 판단한다 */
+		private void suspect(SttTranscript transcript) {
 			synchronized (CallCoordinator.this) {
-				if (call.suspects.contains(transcript.utteranceId()) || call.agentCleared.contains(transcript.utteranceId())) {
+				String id = transcript.utteranceId();
+				String key = partKey(id);
+				if (call.suspects.contains(key) || call.agentCleared.contains(key)) {
+					lastPartial.put(id, transcript);
 					return;
 				}
-								if (hold(transcript.utteranceId(), transcript.text(), transcript.fromEpochMs(), match.riskType(),
-						match.severity(), match.keyword())) {
-					String key = transcript.utteranceId();
+				String text = unjudged(transcript).strip();
+				Optional<KeywordRiskDetector.Match> match = riskDetector.detect(text, false);
+				if (match.isPresent() && hold(key, id, text, holdFrom(transcript), match.get().riskType(),
+						match.get().severity(), match.get().keyword())) {
 					call.suspects.add(key);
-					ringTimer.schedule(Duration.ofMillis(SUSPECT_TIMEOUT_MS), () -> expireSuspect(key));
-				}
-			}
-		}
-
-				/** 최종 결과가 끝내 오지 않은 의심을 거둔다 (센 적이 없으니 횟수는 그대로) */
-		private void expireSuspect(String key) {
-			synchronized (CallCoordinator.this) {
-				if (call.suspects.remove(key)) {
-					log.info("폭언 의심 만료: {} (최종 결과 없음)", call.callId);
-					releaseHoldIfClear(call);
+					lastPartial.put(id, transcript);
+					ringTimer.schedule(Duration.ofMillis(JUDGE_DELAY_MS), () -> judgeLatest(id, key));
 				}
 			}
 		}
 
 		/**
-		 * 발화가 끝났다. 상담원을 향한 욕이면 폭언으로 세고, 의심했지만 폭언이 아니면 오탐지로 자동 해제한다.
-		 * 상담원이 그 의심을 이미 오탐지로 풀었으면 세지 않는다. 판단이 끝나면 남은 이유가 없을 때 차단을 푼다.
+		 * 욕이 보인 뒤 잠시 기다렸다: 발화가 아직 이어져도 마지막 중간 결과로 판단한다.
+		 * 자막이 욕에서 끝나 있으면 인용 어미("~라고")가 곧 나올 수 있어 한 번 더 기다린다.
+		 * 그사이 상담원이 풀었으면 그 부분까지 판단한 것으로 두고 이어진 말은 새로 본다.
 		 */
-		private void judge(SttTranscript transcript, Optional<KeywordRiskDetector.Match> match) {
-			String key = transcript.utteranceId();
+		private void judgeLatest(String utteranceId, String key) {
 			synchronized (CallCoordinator.this) {
-				boolean suspected = call.suspects.remove(key);
-				if (call.agentCleared.remove(key) || !isConnected(call)) {
+				SttTranscript latest = lastPartial.get(utteranceId);
+				if (latest == null || !(call.suspects.contains(key) || call.agentCleared.contains(key))) {
 					return;
 				}
-				long startMs = sinceConnected(call, transcript.fromEpochMs());
-				long endMs = sinceConnected(call, transcript.toEpochMs());
-				if (match.isPresent() && !match.get().reported()) {
-					KeywordRiskDetector.Match abuse = match.get();
-					if (!suspected && !hold(key, transcript.text(), transcript.fromEpochMs(), abuse.riskType(),
-							abuse.severity(), abuse.keyword())) {
-						return;
-					}
-					if (countsAsAbuse(transcript.fromEpochMs(), transcript.toEpochMs(), abuse.riskType())) {
-						applyProtection(call, protection -> protection.abuse(startMs, endMs, transcript.text(), abuse.keyword()));
-					}
-				} else if (suspected) {
-					log.info("폭언 의심 해제: {} {}", call.callId, match.isPresent() ? "제3자 발언" : "최종 결과에 욕설 없음");
-										String keyword = match.map(KeywordRiskDetector.Match::keyword).orElse(null);
-					long to = transcript.toEpochMs() != null ? transcript.toEpochMs() : clock.millis();
-					call.skipRiskUntilEpochMs = Math.max(call.skipRiskUntilEpochMs, to);
-					applyProtection(call, protection -> protection.dismissed(startMs, endMs, transcript.text(), keyword));
+				if (call.suspects.contains(key) && endsWithAbuse(unjudged(latest).strip()) && deferred.add(key)) {
+					ringTimer.schedule(Duration.ofMillis(JUDGE_DELAY_MS), () -> judgeLatest(utteranceId, key));
+					return;
 				}
-				releaseHoldIfClear(call);
+				judge(latest, key);
 			}
+		}
+
+		/** 발화가 끝났다: 아직 판단하지 않은 부분을 판단하고 발화 기록을 지운다 */
+		private void judgeFinal(SttTranscript transcript) {
+			synchronized (CallCoordinator.this) {
+				String id = transcript.utteranceId();
+				judge(transcript, partKey(id));
+				judgedLetters.remove(id);
+				judgedToMs.remove(id);
+				lastPartial.remove(id);
+			}
+		}
+
+		/**
+		 * 판단하지 않은 부분을 본다. 상담원을 향한 욕이면 폭언으로 세고, 의심했지만 폭언이 아니면 오탐지로 자동 해제한다.
+		 * 상담원이 그 의심을 이미 오탐지로 풀었으면 세지 않는다. 판단이 끝나면 남은 이유가 없을 때 차단을 푼다. 잠금 안에서 부른다.
+		 */
+		private void judge(SttTranscript transcript, String key) {
+			String id = transcript.utteranceId();
+			String text = unjudged(transcript).strip();
+			boolean wholeUtterance = transcript.isFinal() && !judgedLetters.containsKey(id);
+			Long from = partStart(transcript);
+			Long holdFrom = holdFrom(transcript);
+			long to = transcript.toEpochMs() != null ? transcript.toEpochMs() : clock.millis();
+			boolean suspected = call.suspects.remove(key);
+			boolean cleared = call.agentCleared.remove(key);
+			deferred.remove(key);
+			judgedLetters.put(id, letters(transcript.text()));
+			judgedToMs.put(id, to);
+			if (cleared || !isConnected(call)) {
+				return;
+			}
+			long startMs = sinceConnected(call, from);
+			long endMs = sinceConnected(call, to);
+			Optional<KeywordRiskDetector.Match> match = wholeUtterance ? riskDetector.detect(text, true)
+					: riskDetector.detectPart(text);
+			if (match.isPresent() && !match.get().reported()) {
+				KeywordRiskDetector.Match abuse = match.get();
+				if (!suspected && !hold(key, id, text, holdFrom, abuse.riskType(), abuse.severity(), abuse.keyword())) {
+					return;
+				}
+				if (countsAsAbuse(from, to, abuse.riskType())) {
+					applyProtection(call, protection -> protection.abuse(startMs, endMs, text, abuse.keyword()));
+				}
+			} else if (suspected) {
+				log.info("폭언 의심 해제: {} {}", call.callId, match.isPresent() ? "제3자 발언" : "욕설 없음");
+				String keyword = match.map(KeywordRiskDetector.Match::keyword).orElse(null);
+				if (transcript.isFinal()) {
+					// 발화 중간 판단이면 올리지 않는다: 발화 전체에 대해 나중에 오는 STT 위험 판단을 버리게 된다
+					call.skipRiskUntilEpochMs = Math.max(call.skipRiskUntilEpochMs, to);
+				}
+				applyProtection(call, protection -> protection.dismissed(startMs, endMs, text, keyword));
+			}
+			releaseHoldIfClear(call);
+		}
+
+		/** 상담원을 향한 욕이 자막 끝에 붙어 있다 (뒤에 한 글자 이하) */
+		private boolean endsWithAbuse(String text) {
+			Optional<KeywordRiskDetector.Match> match = riskDetector.detectPart(text);
+			if (match.isEmpty() || match.get().reported()) {
+				return false;
+			}
+			int at = text.lastIndexOf(match.get().keyword());
+			return at >= 0 && text.length() - (at + match.get().keyword().length()) <= 1;
+		}
+
+		/** 판단 단위 키. 발화의 첫 부분은 발화 id 그대로, 판단한 뒤 이어진 부분은 "id#판단한 글자 수" */
+		private String partKey(String utteranceId) {
+			Integer judged = judgedLetters.get(utteranceId);
+			return judged == null ? utteranceId : utteranceId + "#" + judged;
+		}
+
+		/** 아직 판단하지 않은 뒷부분. 판단한 글자 수만큼(띄어쓰기·문장부호 빼고) 앞에서 건너뛴다 */
+		private String unjudged(SttTranscript transcript) {
+			String text = transcript.text() == null ? "" : transcript.text();
+			Integer judged = judgedLetters.get(transcript.utteranceId());
+			if (judged == null) {
+				return text;
+			}
+			int seen = 0;
+			int at = 0;
+			while (at < text.length() && seen < judged) {
+				if (Character.isLetterOrDigit(text.charAt(at++))) {
+					seen++;
+				}
+			}
+			return text.substring(at);
+		}
+
+		/** 글자 수 (띄어쓰기·문장부호 빼고) */
+		private static int letters(String text) {
+			return text == null ? 0 : (int) text.chars().filter(Character::isLetterOrDigit).count();
+		}
+
+		/** 아직 판단하지 않은 부분이 시작한 시각 (발화 시작을 모르면 null) */
+		private Long partStart(SttTranscript transcript) {
+			Long judgedTo = judgedToMs.get(transcript.utteranceId());
+			if (judgedTo == null) {
+				return transcript.fromEpochMs();
+			}
+			return judgedTo + 1;
+		}
+
+		/** 아직 판단하지 않은 부분을 막을 때 지우기 시작할 시각. 이어진 부분이면 자막 지연만큼 앞당긴다 */
+		private Long holdFrom(SttTranscript transcript) {
+			Long judgedTo = judgedToMs.get(transcript.utteranceId());
+			if (judgedTo == null) {
+				return transcript.fromEpochMs();
+			}
+			return judgedTo - NEXT_PART_LEAD_MS;
 		}
 
 		/**
@@ -850,8 +957,8 @@ public class CallCoordinator {
 				if (risk.fromEpochMs() <= call.skipRiskUntilEpochMs) {
 					return;
 				}
-				if (!isConnected(call) || !hold("risk-" + risk.fromEpochMs() + "-" + risk.toEpochMs(), risk.text(),
-						risk.fromEpochMs(), risk.riskType(), risk.severity(), null)) {
+				String key = "risk-" + risk.fromEpochMs() + "-" + risk.toEpochMs();
+				if (!isConnected(call) || !hold(key, key, risk.text(), risk.fromEpochMs(), risk.riskType(), risk.severity(), null)) {
 					return;
 				}
 				if (countsAsAbuse(risk.fromEpochMs(), risk.toEpochMs(), risk.riskType())) {
@@ -883,9 +990,12 @@ public class CallCoordinator {
 		 * 같은 발화로 다시 부르면 아무것도 하지 않는다 (상담원이 푼 뒤 같은 발화 결과로 바로 다시 막히지 않게).
 		 * 잠금 안에서 부른다.
 		 *
+		 * @param key 판단 단위 (발화, 발화에 이어진 부분, STT 위험 구간). 같은 key로는 한 번만 막는다
+		 * @param utteranceId 상담원에게 알릴 발화 id
 		 * @return 이번에 새로 막았는지
 		 */
-		private boolean hold(String key, String text, Long fromEpochMs, String riskType, String severity, String keyword) {
+		private boolean hold(String key, String utteranceId, String text, Long fromEpochMs, String riskType, String severity,
+				String keyword) {
 			if (!notified.add(key)) {
 				return false;
 			}
@@ -896,7 +1006,7 @@ public class CallCoordinator {
 			int muted = hold.get().muted();
 			// 발화 본문은 개인정보를 담을 수 있어 로그에는 유형과 찾은 단어만 남긴다
 			log.info("위험 발화 감지: {} {} {} '{}' (무음 {}프레임, 차단 유지)", call.callId, riskType, severity, keyword, muted);
-			agentConnection.send(new ServerMessage.RiskDetected(call.callId, key, text, riskType, severity, keyword, muted));
+			agentConnection.send(new ServerMessage.RiskDetected(call.callId, utteranceId, text, riskType, severity, keyword, muted));
 			notifyHoldStarted(call, hold.get());
 			return true;
 		}
@@ -935,7 +1045,7 @@ public class CallCoordinator {
 		// 차단 유지를 켠 이유 (잠금 안에서만 쓴다)
 		/** 상담원이 REST로 켰다. 상담원이 끌 때까지 저절로 풀지 않는다 */
 		private boolean manualHold;
-		/** 판단을 기다리는 폭언 의심 발화 (utteranceId) */
+		/** 판단을 기다리는 폭언 의심 (발화 id, 이어진 부분이면 id#글자 수) */
 		private final Set<String> suspects = new HashSet<>();
 		/** 판단 전에 상담원이 오탐지로 푼 발화. 최종 결과가 와도 세지 않는다 */
 		private final Set<String> agentCleared = new HashSet<>();

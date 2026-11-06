@@ -612,15 +612,81 @@ class CallCoordinatorTest {
 		}
 
 				@Test
-		@DisplayName("폭언 의심 뒤 최종 결과가 끝내 오지 않으면 의심을 거두고 차단을 푼다")
-		void suspectExpiresWithoutFinal() {
+		@DisplayName("욕이 보인 뒤 발화가 끝나지 않아도 잠시 뒤 마지막 중간 결과로 폭언으로 세고 차단을 푼다")
+		void judgesLatestPartialWithoutFinal() {
 			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "시발", false, clock.millis(), null));
-			assertThat(ringTimer.lastDelay()).isEqualTo(Duration.ofMillis(CallCoordinator.SUSPECT_TIMEOUT_MS));
+			assertThat(ringTimer.lastDelay()).isEqualTo(Duration.ofMillis(CallCoordinator.JUDGE_DELAY_MS));
 
+			ringTimer.fireAll(); // 욕에서 끝나 있어 인용 어미를 한 번 더 기다린다
 			ringTimer.fireAll();
 
 			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isFalse();
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).singleElement()
+					.satisfies(event -> assertThat(event.kind()).isEqualTo(CallProtection.EventKind.ABUSE));
+		}
+
+		@Test
+		@DisplayName("남이 한 욕을 전하는 말은 발화가 이어져도 잠시 뒤 오탐지로 풀고, 그 뒤 최종 결과로 다시 세지 않는다")
+		void reportedSpeechDismissedBeforeFinal() {
+			long start = clock.millis();
+			SttListener listener = stt.listener("call-1");
+			listener.onTranscript(new SttTranscript("call-1-0", "그 사람이 저한테 개자식", false, start, null));
+			listener.onTranscript(new SttTranscript("call-1-0", "그 사람이 저한테 개자식이라고 했어요", false, start, null));
+
+			ringTimer.fireAll();
+			listener.onTranscript(new SttTranscript("call-1-0", "그 사람이 저한테 개자식이라고 했어요 그래서요", true, start,
+					clock.millis()));
+
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isFalse();
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).singleElement()
+					.satisfies(event -> assertThat(event.kind()).isEqualTo(CallProtection.EventKind.FALSE_POSITIVE));
+		}
+
+		@Test
+		@DisplayName("자막이 욕에서 끝나 있으면 인용 어미를 한 번 더 기다렸다가, 남이 한 욕을 전하는 말이면 오탐지로 푼다")
+		void waitsForLateReportedEnding() {
+			long start = clock.millis();
+			SttListener listener = stt.listener("call-1");
+			listener.onTranscript(new SttTranscript("call-1-0", "그 사람이 저한테 개자식", false, start, null));
+
+			ringTimer.fireAll(); // 아직 욕에서 끝나 있어 한 번 더 기다린다
 			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).isEmpty();
+			listener.onTranscript(new SttTranscript("call-1-0", "그 사람이 저한테 개자식이라고 했어요", false, start, null));
+			ringTimer.fireAll();
+
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isFalse();
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).singleElement()
+					.satisfies(event -> assertThat(event.kind()).isEqualTo(CallProtection.EventKind.FALSE_POSITIVE));
+		}
+
+		@Test
+		@DisplayName("발화 중 판단한 앞부분을 최종 결과가 띄어쓰기·문장부호만 바꿔 적어도 다시 세지 않고, 뒤에 붙은 욕은 센다")
+		void finalRewriteKeepsJudgedPart() {
+			long start = clock.millis();
+			SttListener listener = stt.listener("call-1");
+			listener.onTranscript(new SttTranscript("call-1-0", "아 씨발 진짜", false, start, null));
+			ringTimer.fireAll();
+
+			listener.onTranscript(new SttTranscript("call-1-0", "아, 씨발. 진짜 개새끼", true, start, clock.millis()));
+
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class))
+					.extracting(ServerMessage.ProtectionEvent::text).containsExactly("아 씨발 진짜", "개새끼");
+		}
+
+		@Test
+		@DisplayName("발화 중 상담원이 의심을 풀어도 그 뒤 같은 발화에 이어진 욕은 다시 막는다")
+		void agentReleaseThenNewAbuseInSameUtterance() {
+			long start = clock.millis();
+			SttListener listener = stt.listener("call-1");
+			listener.onTranscript(new SttTranscript("call-1-0", "시발", false, start, null));
+			coordinator.holdMute("call-1", false);
+			ringTimer.fireAll();
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class))
+					.extracting(ServerMessage.ProtectionEvent::kind).doesNotContain(CallProtection.EventKind.ABUSE);
+
+			listener.onTranscript(new SttTranscript("call-1-0", "시발 이 병신아", false, start, null));
+
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isTrue();
 		}
 
 		@Test
@@ -899,6 +965,33 @@ class CallCoordinatorTest {
 					"call-1", "call-1-e1", CallProtection.EventKind.ABUSE, 30_000, 30_000, "개새끼", "개새끼"));
 			assertThat(agent.all(ServerMessage.ProtectionState.class)).containsExactly(
 					new ServerMessage.ProtectionState("call-1", 1, 2, 0, 2, 0, 1));
+		}
+
+		@Test
+		@DisplayName("쉬지 않고 욕을 이어 하면 발화가 끝나지 않아도 판단한 뒤 나온 욕을 다시 막고 다시 센다")
+		void continuousAbuseCountsEachPart() {
+			long start = clock.millis();
+			SttListener listener = stt.listener("call-1");
+			listener.onTranscript(new SttTranscript("call-1-0", "이 새끼야", false, start, null));
+			ringTimer.fireAll(); // 욕에서 끝나 있어 한 번 더 기다린다
+			ringTimer.fireAll();
+			clock.advance(Duration.ofMillis(1_000));
+			listener.onTranscript(new SttTranscript("call-1-0", "이 새끼야 말 좀 해라", false, start, null));
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isFalse();
+
+			listener.onTranscript(new SttTranscript("call-1-0", "이 새끼야 말 좀 해라 씨발", false, start, null));
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isTrue();
+			ringTimer.fireAll();
+			ringTimer.fireAll();
+			listener.onTranscript(new SttTranscript("call-1-0", "이 새끼야 말 좀 해라 씨발", true, start, clock.millis()));
+
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class))
+					.extracting(ServerMessage.ProtectionEvent::kind, ServerMessage.ProtectionEvent::text)
+					.containsExactly(org.assertj.core.groups.Tuple.tuple(CallProtection.EventKind.ABUSE, "이 새끼야"),
+							org.assertj.core.groups.Tuple.tuple(CallProtection.EventKind.ABUSE, "말 좀 해라 씨발"));
+			assertThat(agent.all(ServerMessage.RiskDetected.class))
+					.extracting(ServerMessage.RiskDetected::utteranceId).containsOnly("call-1-0");
+			assertThat(agent.all(ServerMessage.ProtectionState.class).getLast().abuseCount()).isEqualTo(2); // 허용 횟수 도달
 		}
 
 		@Test
