@@ -1151,51 +1151,52 @@ class CallCoordinatorTest {
 		}
 
 		@Test
-		@DisplayName("발화가 끝나면 그 구간 음성으로 감정을 판단해 emotion을 보내고, 격양이 정책 시간만큼 이어지면 폭언 1회로 센다")
+		@DisplayName("민원인 음성을 0.5초씩 이어 감정 판단에 보내 emotion을 보내고, 격양이 정책 시간만큼 이어지면 폭언 1회로 센다")
 		void emotionAndAgitation() {
 			emotion.willReturn(new EmotionResult(85, true), new EmotionResult(90, true));
 
-			speak(30, "도대체 언제까지");
-			assertThat(emotion.lastPcm).hasSize(30 * CallCoordinator.FRAME_BYTES);
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "도대체 언제까지");
+			assertThat(emotion.lastPcm).hasSize(CallCoordinator.EMOTION_CHUNK_FRAMES * CallCoordinator.FRAME_BYTES);
 			assertThat(agent.all(ServerMessage.Emotion.class)).containsExactly(new ServerMessage.Emotion("call-1", 85, true));
 			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).isEmpty();
 
-			speak(30, "기다리게 하는 거예요!");
-			assertThat(emotion.lastRequest.arousalDurationMs()).isEqualTo(600); // 앞 발화(30프레임)만큼 격앙이 이어졌다
-			assertThat(emotion.lastRequest.callId()).isEqualTo("call-1");
-			assertThat(emotion.lastRequest.endMs() - emotion.lastRequest.startMs()).isEqualTo(600);
-			assertThat(emotion.lastRequest.startMs()).isEqualTo(600); // 첫 발화(0~600ms) 바로 뒤
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "기다리게 하는 거예요!");
+			assertThat(emotion.lastRequest.arousalDurationMs()).isEqualTo(500); // 앞 구간만큼 격앙이 이어졌다
+			assertThat(emotion.lastRequest.callId()).startsWith("call-1-"); // 연결마다 다른 감정 판단 단위
+			assertThat(emotion.lastRequest.startMs()).isEqualTo(500); // 앞 구간(0~500ms) 바로 뒤
+			assertThat(emotion.lastRequest.endMs()).isEqualTo(1000);
 
 			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).singleElement().satisfies(event -> {
 				assertThat(event.kind()).isEqualTo(CallProtection.EventKind.AGITATION);
 				assertThat(event.startMs()).isZero();
-				assertThat(event.text()).isEqualTo("도대체 언제까지 기다리게 하는 거예요!");
+				assertThat(event.text()).isEqualTo("도대체 언제까지"); // 격양 동안 나온 자막
 				assertThat(event.keyword()).isNull();
 			});
-						assertThat(agent.all(ServerMessage.ProtectionState.class).getLast().abuseCount()).isEqualTo(1);
+			assertThat(agent.all(ServerMessage.ProtectionState.class).getLast().abuseCount()).isEqualTo(1);
 		}
 
 		@Test
-		@DisplayName("격양 판단이면 그 발화 중 아직 안 나간 음성부터 막고, 안정 판단이 오면 자동으로 푼다")
+		@DisplayName("격양 판단이면 그 구간 중 아직 안 나간 음성부터 막고, 안정 판단이 오면 자동으로 푼다")
 		void agitationHoldsUntilCalm() {
 			emotion.willReturn(new EmotionResult(85, true), new EmotionResult(20, false));
 
-			speak(5, "몇 번을 문의했는데요!");
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "몇 번을 문의했는데요!");
 			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isTrue();
 			assertThat(agent.all(ServerMessage.MuteHoldChanged.class)).containsExactly(new ServerMessage.MuteHoldChanged("call-1", true));
 			elapse(DELAY_MS);
-			assertThat(agent.audio).hasSize(5).anySatisfy(frame -> assertThat(frame).isEqualTo(new byte[640]));
+			assertThat(agent.audio).hasSize(CallCoordinator.EMOTION_CHUNK_FRAMES)
+					.anySatisfy(frame -> assertThat(frame).isEqualTo(new byte[640]));
 
-			speak(5, "알겠습니다");
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "알겠습니다");
 			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isFalse();
 			assertThat(agent.all(ServerMessage.MuteHoldChanged.class).getLast()).isEqualTo(new ServerMessage.MuteHoldChanged("call-1", false));
 		}
 
-				@Test
-		@DisplayName("상담원이 푼 뒤 늦게 온, 그 전에 끝난 발화의 격양 판단으로는 다시 막지 않는다")
+		@Test
+		@DisplayName("상담원이 푼 뒤 늦게 온, 그 전에 끝난 구간의 격양 판단으로는 다시 막지 않는다")
 		void lateAgitationAfterAgentReleaseIgnored() {
 			emotion.deferred = true;
-			speak(5, "몇 번을 문의했는데요!");
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "몇 번을 문의했는데요!");
 			coordinator.holdMute("call-1", false);
 
 			emotion.pending.getFirst().complete(new EmotionResult(90, true));
@@ -1207,11 +1208,11 @@ class CallCoordinatorTest {
 		@DisplayName("감정 분석이 실패하면 격양 차단을 남기지 않는다")
 		void emotionFailureReleasesAgitationHold() {
 			emotion.deferred = true;
-			speak(5, "몇 번을 문의했는데요!");
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "몇 번을 문의했는데요!");
 			emotion.pending.getFirst().complete(new EmotionResult(90, true));
 			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isTrue();
 
-			speak(5, "다음 말");
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "다음 말");
 			emotion.pending.getLast().completeExceptionally(new IllegalStateException("타임아웃"));
 
 			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isFalse();
@@ -1275,27 +1276,25 @@ class CallCoordinatorTest {
 		}
 
 		@Test
-		@DisplayName("발화 시작 시각을 모르는 첫 발화는 통화 연결 때부터의 음성으로 판단한다")
-		void firstUtteranceWithoutStart() {
-			emotion.willReturn(new EmotionResult(95, true));
-			elapse(500);
-			for (int i = 0; i < 60; i++) {
+		@DisplayName("통화 연결 때부터의 민원인 음성을 끊김 없이 0.5초씩 보내고, 0.5초가 차기 전에는 보내지 않는다")
+		void emotionChunksAreContiguous() {
+			for (int i = 0; i < 2 * CallCoordinator.EMOTION_CHUNK_FRAMES + 10; i++) {
 				coordinator.relayAudio(citizen, frame(1));
 				elapse(20);
 			}
-			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "도대체 뭐 하는 거예요!", true, null, clock.millis()));
 
-			assertThat(emotion.lastPcm).hasSize(60 * CallCoordinator.FRAME_BYTES);
-			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).singleElement()
-					.satisfies(event -> assertThat(event.startMs()).isZero());
+			assertThat(emotion.calls).isEqualTo(2);
+			assertThat(emotion.lastRequest.startMs()).isEqualTo(500);
+			assertThat(emotion.lastRequest.endMs()).isEqualTo(1000);
+			assertThat(emotion.lastPcm).hasSize(CallCoordinator.EMOTION_CHUNK_FRAMES * CallCoordinator.FRAME_BYTES);
 		}
 
 		@Test
-		@DisplayName("감정 판단은 발화 순서대로 하나씩 보내, 앞 결과가 나오기 전에는 다음 발화를 보내지 않는다")
+		@DisplayName("감정 판단은 구간 순서대로 하나씩 보내, 앞 결과가 나오기 전에는 다음 구간을 보내지 않는다")
 		void emotionInOrder() {
 			emotion.deferred = true;
-			speak(5, "첫 문장");
-			speak(5, "둘째 문장");
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "첫 문장");
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "둘째 문장");
 			assertThat(emotion.calls).isEqualTo(1);
 
 			emotion.pending.getFirst().complete(new EmotionResult(20, false));
@@ -1307,12 +1306,52 @@ class CallCoordinatorTest {
 		}
 
 		@Test
-		@DisplayName("중간 자막은 감정 판단에 보내지 않는다")
-		void interimTranscriptSkipsEmotion() {
-			coordinator.relayAudio(citizen, frame(1));
-			stt.listener("call-1").onTranscript(new SttTranscript("call-1-0", "가로등", false, clock.millis(), clock.millis()));
+		@DisplayName("감정 API가 센 연속 격앙 시간이 늘어난 만큼만 세어, 쉬는 동안 상태가 경고로 남아도 시간은 늘지 않는다")
+		void countsServerArousalRun() {
+			emotion.willReturn(EmotionResult.ofState(40, "경고", 500), EmotionResult.ofState(40, "경고", 500),
+					EmotionResult.ofState(40, "경고", 0), EmotionResult.ofState(40, "경고", 500),
+					EmotionResult.ofState(40, "경고", 1000));
 
-			assertThat(emotion.calls).isZero();
+			for (int i = 0; i < 4; i++) {
+				speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "");
+			}
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).isEmpty(); // 정책 1초에 못 미침
+			assertThat(emotion.lastRequest.arousalDurationMs()).isZero(); // 직전 응답의 연속 격앙 시간
+
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "");
+			assertThat(agent.all(ServerMessage.ProtectionEvent.class)).singleElement()
+					.satisfies(event -> assertThat(event.kind()).isEqualTo(CallProtection.EventKind.AGITATION));
+		}
+
+		@Test
+		@DisplayName("상담원이 차단을 풀면 안정 판단이 한 번 올 때까지 격양으로 다시 막지 않는다")
+		void agentReleaseSuppressesAgitationUntilCalm() {
+			emotion.willReturn(new EmotionResult(85, true), new EmotionResult(85, true), new EmotionResult(10, false),
+					new EmotionResult(85, true));
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "");
+			coordinator.holdMute("call-1", false);
+
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "");
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isFalse();
+
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "");
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "");
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isTrue();
+		}
+
+		@Test
+		@DisplayName("감정 판단이 밀려 구간이 쌓이면 새 구간은 버린다")
+		void dropsEmotionWhenBacklogged() {
+			emotion.deferred = true;
+			for (int i = 0; i < (CallCoordinator.EMOTION_MAX_PENDING + 2) * CallCoordinator.EMOTION_CHUNK_FRAMES; i++) {
+				coordinator.relayAudio(citizen, frame(1));
+				elapse(20);
+			}
+			for (int done = 0; done < emotion.pending.size(); done++) {
+				emotion.pending.get(done).complete(new EmotionResult(10, false));
+			}
+
+			assertThat(emotion.calls).isEqualTo(CallCoordinator.EMOTION_MAX_PENDING);
 		}
 
 		@Test

@@ -43,10 +43,19 @@ public final class CallProtection {
 	}
 
 	/**
-	 * 민원인 발화 하나의 감정 판단. 격양이 이어진 시간이 정책 시간에 닿으면 폭언 1회로 세고 0부터 다시 잰다.
-	 * 격양이 아닌 발화가 오면 이어진 시간을 0으로 돌린다.
+	 * 민원인 음성 구간 하나의 감정 판단. 격양이 이어진 시간이 정책 시간에 닿으면 폭언 1회로 세고 0부터 다시 잰다.
+	 * 격양이 아닌 구간이 오면 이어진 시간을 0으로 돌린다.
+	 *
+	 * @param text 그때 자막. 구간마다 같은 자막이 오거나 자막이 이어 붙으므로 겹치지 않게 모은다
 	 */
 	public synchronized Result emotion(boolean agitated, long startMs, long endMs, String text) {
+		return emotion(agitated, startMs, endMs, Math.max(0, endMs - startMs), text);
+	}
+
+	/**
+	 * 격양이 이어진 시간을 addMs만큼 늘린다. 감정 API가 연속 격앙 시간을 직접 세면(쉬는 동안은 늘지 않음) 그 늘어난 만큼을 넘긴다.
+	 */
+	public synchronized Result emotion(boolean agitated, long startMs, long endMs, long addMs, String text) {
 		if (terminating) {
 			return Result.NONE;
 		}
@@ -58,8 +67,8 @@ public final class CallProtection {
 			agitationStartMs = startMs;
 		}
 		agitationEndMs = endMs;
-		agitationMs += Math.max(0, endMs - startMs);
-		agitationTexts.add(text);
+		agitationMs += addMs;
+		addAgitationText(text);
 		if (agitationMs < policy.agitationSeconds() * 1000L) {
 			return Result.NONE;
 		}
@@ -144,6 +153,24 @@ public final class CallProtection {
 			return Action.SESSION_END;
 		}
 		return Action.NONE;
+	}
+
+	/** 같은 자막은 한 번만, 앞 자막이 이어 붙은 자막이면 앞 것을 바꾼다 */
+	private void addAgitationText(String text) {
+		if (text == null || text.isBlank()) {
+			return;
+		}
+		if (!agitationTexts.isEmpty()) {
+			String last = agitationTexts.getLast();
+			if (text.equals(last)) {
+				return;
+			}
+			if (text.startsWith(last)) {
+				agitationTexts.set(agitationTexts.size() - 1, text);
+				return;
+			}
+		}
+		agitationTexts.add(text);
 	}
 
 	private void resetAgitation() {

@@ -1,5 +1,6 @@
 package com.govtech.voicegateway.domain.call;
 
+import java.io.ByteArrayOutputStream;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -14,6 +15,7 @@ import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import org.springframework.stereotype.Service;
@@ -79,6 +81,13 @@ public class CallCoordinator {
 	 * 자막은 음성보다 늦게 나오므로, 판단할 때 자막에 아직 안 나온 다음 욕의 음성이 그 앞에 들어 있을 수 있다.
 	 */
 	static final long NEXT_PART_LEAD_MS = 1_000;
+	/**
+	 * 감정 판단에 보내는 구간 길이 (25프레임 = 0.5초). 감정 API가 통화별 화자 기준선 대비로 판정하므로
+	 * 민원인 음성을 연결 때부터 이 길이로 끊어 빠짐없이 순서대로 보낸다.
+	 */
+	static final int EMOTION_CHUNK_FRAMES = 25;
+	/** 감정 API가 밀려 이만큼 구간이 쌓이면 새 구간은 버린다 (3초) */
+	static final int EMOTION_MAX_PENDING = 6;
 
 	private final VoiceGatewayProperties properties;
 	private final RingTimer ringTimer;
@@ -298,13 +307,15 @@ public class CallCoordinator {
 		call.protection = new CallProtection(callId, policyStore.get());
 		AudioHistory history = new AudioHistory(HISTORY_FRAMES);
 		call.history = history;
-		SttRelay.Session stt = sttRelay.open(callId, new CallSttListener(call, agent.connection));
+		CallSttListener listener = new CallSttListener(call, agent.connection);
+		SttRelay.Session stt = sttRelay.open(callId, listener);
 		call.stt = stt;
 		audioSinks.put(call.citizen.id(), frame -> {
 			long receivedAt = clock.millis();
 			delayLine.offer(frame, delayLines.nowNanos(), receivedAt);
 			stt.accept(frame, receivedAt);
 			history.add(frame, receivedAt);
+			listener.acceptEmotionFrame(frame, receivedAt);
 		});
 		call.citizen.send(new ServerMessage.Connected(callId, Role.AGENT, 0));
 		agent.connection.send(new ServerMessage.Connected(callId, Role.CITIZEN, properties.delayMs()));
@@ -700,10 +711,26 @@ public class CallCoordinator {
 		private final Call call;
 		private final ClientConnection agentConnection;
 		private final Set<String> notified = ConcurrentHashMap.newKeySet();
-		/** 앞 발화가 끝난 시각. 처음에는 통화 연결 시각 (STT 결과 스레드에서만 쓴다) */
-		private long lastUtteranceEndMs;
-		/** 감정 분석을 발화 순서대로 하나씩 하도록 이어 붙이는 꼬리 (STT 결과 스레드에서만 쓴다) */
+		// 감정 판단에 보낼 구간 (민원인 음성 스레드에서만 쓴다)
+		private final ByteArrayOutputStream emotionChunk = new ByteArrayOutputStream(EMOTION_CHUNK_FRAMES * FRAME_BYTES);
+		private int emotionFrames;
+		/** 지금 모으는 구간의 첫 프레임을 받은 시각 */
+		private long emotionFromEpochMs;
+		/** 지금 모으는 구간이 통화 음성에서 시작하는 위치 (ms). 감정 API에는 끊김 없는 음성 시각으로 보낸다 */
+		private long emotionAudioMs;
+		/** 감정 판단을 구간 순서대로 하나씩 하도록 이어 붙이는 꼬리 */
 		private CompletableFuture<Void> emotionTail = CompletableFuture.completedFuture(null);
+		private final AtomicInteger emotionPending = new AtomicInteger();
+		/** 밀려서 구간을 버리는 중이다 (처음 한 번만 로그) */
+		private boolean emotionDropping;
+		/** 감정 API가 화자 기준선을 잡는 단위. 앱이 callId를 다시 써도 앞 통화 상태를 이어받지 않게 연결마다 다르게 한다 */
+		private final String emotionKey;
+		/** 감정 API가 마지막으로 센 연속 격앙 시간 (ms). 모르면 -1 */
+		private volatile long emotionRunMs = -1;
+		/** 마지막 감정 상태 (상태가 바뀔 때만 로그, 잠금 안에서만 쓴다) */
+		private String emotionState;
+		/** 마지막 자막 (격양 기록에 함께 남긴다) */
+		private volatile String lastText = "";
 		/** 마지막으로 센 폭언이 끝난 시각 (잠금 안에서만 쓴다) */
 		private Long lastAbuseToMs;
 		// 발화가 끝나기 전에 판단한 앞부분 (발화 id별, 잠금 안에서만 쓴다)
@@ -719,7 +746,7 @@ public class CallCoordinator {
 		private CallSttListener(Call call, ClientConnection agentConnection) {
 			this.call = call;
 			this.agentConnection = agentConnection;
-			this.lastUtteranceEndMs = call.connectedAtEpochMs;
+			this.emotionKey = call.callId + "-" + call.connectedAtEpochMs;
 		}
 
 		@Override
@@ -729,9 +756,11 @@ public class CallCoordinator {
 			}
 			sendIfConnected(call, agentConnection, new ServerMessage.Transcript(call.callId, transcript.utteranceId(),
 					transcript.text(), transcript.isFinal()));
+			if (transcript.text() != null && !transcript.text().isBlank()) {
+				lastText = transcript.text();
+			}
 			if (transcript.isFinal()) {
 				judgeFinal(transcript);
-				analyzeEmotion(transcript);
 			} else {
 				suspect(transcript);
 			}
@@ -887,58 +916,96 @@ public class CallCoordinator {
 		}
 
 		/**
-		 * 끝난 발화의 음성을 감정 분석에 보낸다. 발화 시작 시각을 모르면 앞 발화가 끝난 뒤부터로 본다.
-		 * 결과는 상담원에게 emotion으로 보내고, 격양이 이어진 시간은 보호 정책이 센다.
+		 * 민원인 음성 프레임을 감정 판단 구간으로 모은다. 0.5초가 차면 앞 구간 결과가 나온 뒤 보낸다
+		 * (감정 API가 구간을 이어 붙여 판정하므로 순서가 바뀌면 안 된다). 결과는 상담원에게 emotion으로 보내고,
+		 * 격양이 이어진 시간은 보호 정책이 센다.
 		 */
-		private void analyzeEmotion(SttTranscript transcript) {
-			long to = transcript.toEpochMs() == null ? clock.millis() : transcript.toEpochMs();
-			long from = transcript.fromEpochMs() != null ? transcript.fromEpochMs() : lastUtteranceEndMs;
-			lastUtteranceEndMs = to + 1;
-			byte[] pcm = call.history.between(from, to);
-			if (pcm.length == 0) {
+		private void acceptEmotionFrame(byte[] frame, long receivedAt) {
+			if (emotionFrames == 0) {
+				emotionFromEpochMs = receivedAt;
+			}
+			emotionChunk.writeBytes(frame);
+			if (++emotionFrames < EMOTION_CHUNK_FRAMES) {
 				return;
 			}
-			long startMs = sinceConnected(call, from);
-			long endMs = startMs + pcm.length / (FRAME_BYTES / 20);
-			// 앞 발화 결과가 나온 뒤에 보낸다 (결과 순서가 바뀌면 격양이 이어진 시간이 틀어진다)
+			byte[] pcm = emotionChunk.toByteArray();
+			long fromEpochMs = emotionFromEpochMs;
+			long audioStartMs = emotionAudioMs;
+			long audioEndMs = audioStartMs + EMOTION_CHUNK_FRAMES * 20L;
+			emotionChunk.reset();
+			emotionFrames = 0;
+			emotionAudioMs = audioEndMs;
+			if (emotionPending.get() >= EMOTION_MAX_PENDING) {
+				if (!emotionDropping) {
+					log.warn("감정 판단이 밀려 구간을 버립니다: {} [{}-{}]", call.callId, audioStartMs, audioEndMs);
+				}
+				emotionDropping = true;
+				return;
+			}
+			emotionDropping = false;
+			emotionPending.incrementAndGet();
+			String text = lastText;
 			emotionTail = emotionTail
-					.thenCompose(ignored -> isConnected(call) // 격앙 누적 시간은 앞 발화 결과를 반영한 뒤 읽는다
-							? emotionAnalyzer.analyze(new EmotionRequest(call.callId, pcm, transcript.text(), startMs, endMs,
-									call.protection.agitationMs()))
+					.thenCompose(ignored -> isConnected(call) // 격앙 누적 시간은 앞 구간 결과를 반영한 뒤 읽는다
+							? emotionAnalyzer.analyze(new EmotionRequest(emotionKey, pcm, text, audioStartMs, audioEndMs,
+									emotionRunMs >= 0 ? emotionRunMs : call.protection.agitationMs()))
 							: CompletableFuture.<EmotionResult>completedFuture(null))
 					.thenAccept(result -> {
 						if (result != null) {
-							onEmotion(result, startMs, endMs, transcript.text());
+							onEmotion(result, fromEpochMs, fromEpochMs + (audioEndMs - audioStartMs), text);
 						}
 					})
-										.exceptionally(e -> {
+					.exceptionally(e -> {
 						log.warn("감정 분석 실패: {} {}", call.callId, e.toString());
 						onEmotionFailed();
 						return null;
-					});
+					})
+					.whenComplete((ignored, e) -> emotionPending.decrementAndGet());
 		}
 
-		private void onEmotion(EmotionResult result, long startMs, long endMs, String text) {
+		/**
+		 * 감정 판단 결과. 격양이면 그 구간 중 아직 안 나간 부분부터 막고, 안정이면 격양 때문에 켠 차단을 푼다.
+		 * 상담원이 차단을 푼 뒤에는 안정 판단이 한 번 올 때까지 격양으로 다시 막지 않는다 (감정 API는 쉬는 동안 상태를 유지한다).
+		 * 격양이 이어진 시간은 감정 API가 센 연속 격앙 시간이 늘어난 만큼 보호 정책에 더한다 (목업이면 구간 길이).
+		 */
+		private void onEmotion(EmotionResult result, long fromEpochMs, long toEpochMs, String text) {
 			synchronized (CallCoordinator.this) {
 				if (!isConnected(call)) {
 					return;
 				}
+				if (!result.state().equals(emotionState)) {
+					log.info("감정 상태: {} {} score={}", call.callId, result.state(), result.score());
+					emotionState = result.state();
+				}
 				agentConnection.send(new ServerMessage.Emotion(call.callId, result.score(), result.agitated()));
-				// 격양이면 그 발화 중 아직 안 나간 부분부터 막고, 안정이면 격양 때문에 켠 차단을 푼다
-								// 상담원이 차단을 푼 뒤 도착한, 그 전에 끝난 발화의 격양은 다시 막지 않는다
-				if (result.agitated() && call.connectedAtEpochMs + endMs > call.skipRiskUntilEpochMs) {
-					Optional<DelayLine.HoldStart> hold = startAutoHold(call, call.connectedAtEpochMs + startMs);
+				if (!result.agitated()) {
+					call.agitationReleased = false;
+				}
+				if (result.agitated() && !call.agitationReleased && toEpochMs > call.skipRiskUntilEpochMs) {
+					Optional<DelayLine.HoldStart> hold = startAutoHold(call, fromEpochMs);
 					hold.ifPresent(started -> notifyHoldStarted(call, started));
 					call.agitationHold = hold.isPresent();
 				} else {
 					call.agitationHold = false;
 				}
-				applyProtection(call, protection -> protection.emotion(result.agitated(), startMs, endMs, text));
+				boolean continuing;
+				long addMs;
+				if (result.runMs() >= 0) {
+					continuing = result.runMs() > 0;
+					long before = Math.max(0, emotionRunMs);
+					addMs = result.runMs() >= before ? result.runMs() - before : result.runMs(); // 작아졌으면 새로 시작한 격앙
+					emotionRunMs = result.runMs();
+				} else {
+					continuing = result.agitated();
+					addMs = toEpochMs - fromEpochMs;
+				}
+				long startMs = sinceConnected(call, fromEpochMs);
+				long endMs = sinceConnected(call, toEpochMs);
+				applyProtection(call, protection -> protection.emotion(continuing, startMs, endMs, addMs, text));
 				releaseHoldIfClear(call);
 			}
 		}
 
-				/** 판단이 없으면 격양 차단을 남겨 두지 않는다 (다음 판단이 영영 안 올 수 있다) */
 		private void onEmotionFailed() {
 			synchronized (CallCoordinator.this) {
 				call.agitationHold = false;
@@ -1051,6 +1118,8 @@ public class CallCoordinator {
 		private final Set<String> agentCleared = new HashSet<>();
 				/** 마지막 감정 판단이 격양이다 */
 		private boolean agitationHold;
+		/** 상담원이 차단을 풀었다. 안정 판단이 한 번 올 때까지 격양으로 다시 막지 않는다 */
+		private boolean agitationReleased;
 		/** STT 엔진이 hold로 켰다 */
 		private boolean sttHold;
 		/** 이 시각까지 끝난 구간의 늦은 위험·격양 판단으로는 다시 막지 않는다 (상담원 해제, 오탐지 판단) */
@@ -1069,6 +1138,7 @@ public class CallCoordinator {
 			agentCleared.addAll(suspects);
 			suspects.clear();
 						agitationHold = false;
+			agitationReleased = true;
 			sttHold = false;
 			holdUntilEpochMs = 0;
 			if (releaseTimer != null) {
