@@ -1324,6 +1324,18 @@ class CallCoordinatorTest {
 		}
 
 		@Test
+		@DisplayName("조용해져 감정 API가 경고 상태만 유지하고 연속 격앙 시간이 0이면 격양 차단을 푼다")
+		void releasesWhenServerKeepsWarningWhileQuiet() {
+			emotion.willReturn(EmotionResult.ofState(40, "경고", 500), EmotionResult.ofState(0, "경고", 0));
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "");
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isTrue();
+
+			speak(CallCoordinator.EMOTION_CHUNK_FRAMES, "");
+
+			assertThat(coordinator.snapshot().calls().getFirst().muteHold()).isFalse();
+		}
+
+		@Test
 		@DisplayName("상담원이 차단을 풀면 안정 판단이 한 번 올 때까지 격양으로 다시 막지 않는다")
 		void agentReleaseSuppressesAgitationUntilCalm() {
 			emotion.willReturn(new EmotionResult(85, true), new EmotionResult(85, true), new EmotionResult(10, false),
