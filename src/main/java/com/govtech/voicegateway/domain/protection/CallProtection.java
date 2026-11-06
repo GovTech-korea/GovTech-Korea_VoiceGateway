@@ -93,7 +93,19 @@ public final class CallProtection {
 		return new Result(events, Action.NONE);
 	}
 
-	/** 상담원이 아닌 쪽(STT)이 차단을 풀었다. 그때까지의 폭언은 오탐지로 보지 않는다 */
+	/**
+	 * 폭언 의심으로 차단했다가 발화가 끝난 뒤 폭언이 아니라고 봤다 (제3자 발언 등). 센 적이 없으니 횟수는 그대로 두고
+	 * 상담원 화면에 남길 오탐지 기록만 만든다.
+	 */
+	public synchronized Result dismissed(long startMs, long endMs, String text, String keyword) {
+		if (terminating) {
+			return Result.NONE;
+		}
+		return new Result(List.of(new Event(nextEventId(), EventKind.FALSE_POSITIVE, startMs, endMs, text, keyword)),
+				Action.NONE);
+	}
+
+	/** 상담원이 아닌 쪽(STT, 자동 해제)이 차단을 풀었다. 그때까지의 폭언은 오탐지로 보지 않는다 */
 	public synchronized void holdReleased() {
 		holdAbuses.clear();
 	}
@@ -116,11 +128,15 @@ public final class CallProtection {
 	private Action count() {
 		if (!noticed) {
 			abuseCount++;
-			if (abuseCount >= policy.abuseLimit()) {
-				noticed = true;
-				return Action.AFTER_NOTICE;
+			if (abuseCount < policy.abuseLimit()) {
+				return Action.NONE;
 			}
-			return Action.NONE;
+			noticed = true;
+			if (policy.afterNotice() == ProtectionPolicy.AfterNotice.IMMEDIATE) {
+				terminating = true; // 안내 후 즉시 종료: 폭언 후 안내 없이 바로 세션 종료
+				return Action.SESSION_END;
+			}
+			return Action.AFTER_NOTICE;
 		}
 		afterNoticeCount++;
 		if (afterNoticeCount >= policy.effectiveAfterNoticeLimit()) {
@@ -143,9 +159,9 @@ public final class CallProtection {
 	/** 폭언을 센 뒤 민원인에게 틀 안내 멘트 ('폭언 안내'는 통화 연결 때 나가므로 여기 없다) */
 	public enum Action {
 		NONE,
-		/** 폭언 후 안내: 안내 전 폭언이 허용 횟수에 닿음. 이후 폭언은 안내 후 횟수로 센다 */
+		/** 폭언 후 안내: 안내 전 폭언이 허용 횟수에 닿음 (추가 폭언 시 종료 정책). 이후 폭언은 안내 후 횟수로 센다 */
 		AFTER_NOTICE,
-		/** 세션 종료: 멘트 뒤 통화를 끊는다 */
+		/** 세션 종료: 안내 후 폭언이 허용 횟수에 닿거나, 즉시 종료 정책에서 안내 전 폭언이 허용 횟수에 닿음. 멘트 뒤 통화를 끊는다 */
 		SESSION_END
 	}
 

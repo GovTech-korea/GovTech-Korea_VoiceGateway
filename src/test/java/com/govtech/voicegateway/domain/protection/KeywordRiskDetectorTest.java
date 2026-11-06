@@ -35,6 +35,35 @@ class KeywordRiskDetectorTest {
 		});
 	}
 
+	@ParameterizedTest
+	@ValueSource(strings = { "그 사람이 저한테 개자식이라고 했어요.", "옆집 사람이 저보고 병신이래요",
+			"그 사람이 저한테 개새끼라는 말을 했어요" })
+	@DisplayName("남이 한 욕을 전하는 말은 최종 결과에서 reported로 본다")
+	void reported(String text) {
+		assertThat(detector.detect(text, true)).hasValueSatisfying(m -> assertThat(m.reported()).isTrue());
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "야이 개새끼야 일 처리 이따구로 할래!", "아이 씨발 넘이 뭐야", "하… 진짜 병신이세요?",
+			"이 개새끼라고 하니까 화나냐? 개새끼야", "너 죽여버린다고!", "씨발이라고 했대요 야 이 자식아" })
+		@DisplayName("상담원에게 하는 욕, 인용 꼴이 아닌 욕이 하나라도 섞인 말, 위협은 reported가 아니다")
+	void notReported(String text) {
+		assertThat(detector.detect(text, true)).hasValueSatisfying(m -> assertThat(m.reported()).isFalse());
+	}
+
+	@Test
+	@DisplayName("중간 결과는 끝이 잘려 있을 수 있어 reported로 보지 않는다")
+	void interimNotReported() {
+		assertThat(detector.detect("그 사람이 저한테 개자식이라고", false)).hasValueSatisfying(m -> assertThat(m.reported()).isFalse());
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "이 개새가 그런다고 욕을 안할 줄 알아!", "아니 왜 상등신처럼 행동해요" })
+	@DisplayName("시연 대사의 STT 표기(개새가, 상등신)도 찾는다")
+	void scenarioWords(String text) {
+		assertThat(detector.detect(text)).isPresent();
+	}
+
 	@Test
 	@DisplayName("'새끼'보다 앞선 규칙(개새끼, 위협)이 먼저 보고된다")
 	void saekkiOrder() {

@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -15,7 +16,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * 1차 규칙 필터: STT 자막에서 욕설·위협 표현을 찾는다 (보고서 처리 흐름의 "규칙·키워드 필터").
- * 문맥(누구를 향했는지 등)은 판단하지 않는다. 그건 뒤에 붙을 LLM 판단의 몫이고, 그 결과가 오면 이 결과를 대신한다.
+ * 문맥(누구를 향했는지 등)은 거의 판단하지 않는다. 그건 뒤에 붙을 LLM 판단의 몫이고, 그 결과가 오면 이 결과를 대신한다.
+ * 다만 남이 한 욕을 전하는 말("그 사람이 저한테 개자식이라고 했어요")은 최종 결과에서 {@link Match#reported()}로 알려 준다.
  * <p>
  * 오탐(정상 민원인을 차단)이 가장 위험한 실패이므로 정밀도를 우선한다.
  * <ul>
@@ -29,8 +31,12 @@ import org.springframework.stereotype.Component;
 @Component
 public class KeywordRiskDetector {
 
-	/** 찾은 표현과 그 유형·위험도 (MOMIN 보호 판단 모델의 값) */
-	public record Match(String keyword, String riskType, String severity) {
+	/**
+	 * 찾은 표현과 그 유형·위험도 (MOMIN 보호 판단 모델의 값).
+	 *
+	 * @param reported 찾은 표현이 모두 남이 한 말을 전하는 꼴이다 (제3자 발언). 최종 결과에서만 판단하고, 중간 결과는 늘 false
+	 */
+	public record Match(String keyword, String riskType, String severity, boolean reported) {
 	}
 
 	/** pattern이 없으면 keyword 글자가 들어 있는지만 본다. finalOnly면 발화가 끝난 최종 결과에서만 본다 */
@@ -40,7 +46,37 @@ public class KeywordRiskDetector {
 		boolean matches(String text) {
 			return pattern == null ? text.contains(keyword) : pattern.matcher(text).find();
 		}
+
+		/** 찾은 곳마다 바로 뒤에 인용 어미가 붙었는지 ("개자식이라고", "죽인다고") */
+		boolean allReported(String text) {
+			if (pattern == null) {
+				for (int at = text.indexOf(keyword); at >= 0; at = text.indexOf(keyword, at + 1)) {
+					if (!reportedAfter(text, at + keyword.length())) {
+						return false;
+					}
+				}
+				return true;
+			}
+			Matcher matcher = pattern.matcher(text);
+			while (matcher.find()) {
+				if (!reportedAfter(text, matcher.end())) {
+					return false;
+				}
+			}
+			return true;
+		}
+
+		/** 끝 글자부터 보는 이유: "죽인다"+"고"처럼 어미가 찾은 표현의 끝 글자에 걸친다 */
+		private static boolean reportedAfter(String text, int end) {
+			return REPORTED.matcher(text).region(Math.max(0, end - 1), text.length()).lookingAt();
+		}
 	}
+
+	/** 남의 말을 전하는 어미. 찾은 표현 끝 글자 뒤 세 글자 안에 와야 한다 (개자식이라고, 새끼라는, 죽인다고, 병신이래요) */
+	private static final Pattern REPORTED = Pattern.compile("(?:.[가-힣]{0,3}?)?(?:라고|다고|라며|라면서|라는|래요|대요|랬|댔)");
+
+	/** STT가 "개새끼가·개새끼야"를 잘라 적은 형태. "한개새로"(한 개 새로) 같은 말과 헷갈리지 않게 앞 글자가 없을 때만 본다 */
+	private static final Pattern GAESAE = Pattern.compile("(?<![가-힣])개새(?:가|야|들)(?![가-힣])");
 
 	/** 욕설 단어를 품었지만 정상인 말 */
 	private static final List<String> SAFE_WORDS = List.of("시발점", "시발역", "시발택시", "질병신", "병신청", "신분증", "등신대",
@@ -80,7 +116,8 @@ public class KeywordRiskDetector {
 					"지랄", "미친놈", "미친년", "또라이", "썅", "엿먹어"),
 			List.of(new Rule("새끼", SAEKKI, "ABUSE", "MEDIUM", false, false),
 					new Rule("새끼", I_SAEKKI, "ABUSE", "MEDIUM", false, true),
-					new Rule("자식", JASIK, "ABUSE", "MEDIUM", false, false)),
+					new Rule("자식", JASIK, "ABUSE", "MEDIUM", false, false),
+					new Rule("개새", GAESAE, "ABUSE", "MEDIUM", false, false)),
 			rules("ABUSE", "MEDIUM", false, loadWords(ABUSE_WORDS)))
 			.flatMap(List::stream)
 			.toList();
@@ -120,10 +157,18 @@ public class KeywordRiskDetector {
 		}
 		String compact = cleaned.replaceAll("\\s+", "");
 		String spaced = cleaned;
-		return rules.stream()
+				List<Rule> matched = rules.stream()
 				.filter(rule -> isFinal || !rule.finalOnly())
 				.filter(rule -> rule.matches(rule.ignoreSpaces() ? compact : spaced))
-				.findFirst()
-				.map(rule -> new Match(rule.keyword(), rule.riskType(), rule.severity()));
+				.toList();
+		// 인용이 아닌 욕이 하나라도 있으면 그것을 알린다. 위협은 "죽인다고!"처럼 직접 하는 말에도 인용 어미가 붙어 인용으로 보지 않는다
+		for (Rule rule : matched) {
+			boolean reported = isFinal && rule.riskType().equals("ABUSE")
+					&& rule.allReported(rule.ignoreSpaces() ? compact : spaced);
+			if (!reported) {
+				return Optional.of(new Match(rule.keyword(), rule.riskType(), rule.severity(), false));
+			}
+		}
+		return matched.stream().findFirst().map(rule -> new Match(rule.keyword(), rule.riskType(), rule.severity(), true));
 	}
 }

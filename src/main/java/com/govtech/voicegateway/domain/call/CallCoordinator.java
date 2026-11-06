@@ -55,6 +55,9 @@ import lombok.extern.slf4j.Slf4j;
  * 통화별 {@link DelayLine}을 거쳐 설정한 시간({@code voicegateway.delay-ms})만큼 늦게 상담원에게 간다.
  * 상담원 음성은 바로 민원인에게 간다. 통화가 연결되면 민원인에게 '폭언 안내' 멘트를 먼저 들려주고, 안내 멘트가 나가는 동안 상담원 음성은 보내지 않는다.
  * 폭언과 감정 격양은 통화별 {@link CallProtection}이 보호 정책대로 세고, 정책에 닿으면 안내 멘트를 틀거나 통화를 끊는다.
+ * <p>
+ * 민원인 음성 차단 유지는 켠 이유({@link Call#suspects 폭언 의심}, {@link Call#agitationHold 격양}, 안내 멘트 재생,
+ * {@link Call#manualHold 상담원})가 모두 없어지면 저절로 풀린다. 상담원이 켠 차단은 상담원이 풀 때까지 이어진다.
  */
 @Slf4j
 @Service
@@ -65,7 +68,9 @@ public class CallCoordinator {
 	/** 감정 분석에 보낼 발화 음성을 꺼내려고 들고 있는 최근 민원인 음성 (30초) */
 	static final int HISTORY_FRAMES = 1500;
 	/** '세션 종료' 멘트가 앱에서 끝까지 재생되도록 멘트 길이보다 조금 더 기다렸다가 끊는다 */
-	static final long TERMINATE_MARGIN_MS = 500;
+		static final long TERMINATE_MARGIN_MS = 500;
+	/** 폭언 의심 뒤 최종 결과가 이 시간 안에 오지 않으면 (STT가 발화를 버리거나 끊김) 의심을 거둔다 */
+	static final long SUSPECT_TIMEOUT_MS = 15_000;
 
 	private final VoiceGatewayProperties properties;
 	private final RingTimer ringTimer;
@@ -135,14 +140,21 @@ public class CallCoordinator {
 
 	/**
 	 * 상담원이 REST로 민원인 음성 차단 유지를 켜거나 끈다. 바뀐 상태는 상담원 앱에 mute-hold-changed로도 알린다.
-	 * 끄면 오탐지 해제로 보고, 그 차단 중에 확정한 폭언을 횟수에서 뺀다. 위험 판단의 차단 시작({@code protect})과 겹치지 않게
-	 * 해제부터 오탐지 처리까지 한 잠금 안에서 한다.
+	 * 켠 차단은 상담원이 끌 때까지 저절로 풀리지 않는다. 끄면 자동 차단 이유도 모두 지우고 오탐지 해제로 보아,
+	 * 그 차단 중에 확정한 폭언을 횟수에서 빼고 판단 중이던 폭언 의심은 세지 않는다.
+	 * 위험 판단의 차단 시작과 겹치지 않게 해제부터 오탐지 처리까지 한 잠금 안에서 한다.
 	 *
 	 * @return 켤 때 새로 무음 처리한 대기 프레임 수 (끌 때는 0). 통화 중인 callId가 아니면 비어 있다
 	 */
 	public synchronized OptionalInt holdMute(String callId, boolean hold) {
 		OptionalInt muted = setHold(callId, hold);
-		if (muted.isPresent()) {
+		Call call = callsById.get(callId);
+		if (muted.isPresent() && call != null) {
+						call.manualHold = hold;
+			if (!hold) {
+				call.clearAutoHolds();
+				call.skipRiskUntilEpochMs = clock.millis(); // 이미 끝난 발화의 늦은 판단으로 다시 막지 않는다
+			}
 			notifyHold(callId);
 			if (!hold) {
 				stopAnnouncement(callId); // 상담원이 바로 말할 수 있게 재생 중인 안내를 멈춘다
@@ -454,6 +466,9 @@ public class CallCoordinator {
 				if (call.terminateTimer != null) {
 					call.terminateTimer.cancel();
 				}
+				if (call.releaseTimer != null) {
+					call.releaseTimer.cancel();
+				}
 				call.stt.close();
 				if (agent != null) {
 					audioSinks.remove(agent.connection.id());
@@ -533,6 +548,54 @@ public class CallCoordinator {
 
 	// ---------- 보호 정책 ----------
 
+	/**
+	 * 자동으로 켠 차단 유지를 풀 때가 됐으면 푼다. 켠 이유가 남아 있으면 그대로 두고,
+	 * 안내 멘트만 남았으면 멘트가 끝날 때 다시 본다. '세션 종료' 멘트 뒤 끊을 통화는 풀지 않는다.
+	 */
+	private synchronized void releaseHoldIfClear(Call call) {
+				if (!isConnected(call) || !call.delayLine.isHold() || call.manualHold || call.sttHold || !call.suspects.isEmpty()
+				|| call.agitationHold || call.protection.isTerminating()) {
+			return;
+		}
+		long waitMs = call.holdUntilEpochMs - clock.millis();
+		if (waitMs > 0) {
+			if (call.releaseTimer != null) {
+				call.releaseTimer.cancel();
+			}
+			call.releaseTimer = ringTimer.schedule(Duration.ofMillis(waitMs), () -> releaseHoldIfClear(call));
+			return;
+		}
+		if (setHold(call.callId, false).isPresent()) {
+			call.protection.holdReleased();
+			call.agent.connection.send(new ServerMessage.MuteHoldChanged(call.callId, false));
+		}
+	}
+
+	/**
+	 * 자동 차단을 켠다: 민원인 음성 중 fromEpochMs부터 아직 상담원에게 안 나간 부분을 지우고 차단 유지를 켠다.
+	 * 상태 알림(mute-hold-changed)은 부르는 쪽이 {@link #notifyHoldStarted}로 보낸다.
+	 *
+	 * @return 통화가 끝났으면 비어 있다
+	 */
+	private synchronized Optional<DelayLine.HoldStart> startAutoHold(Call call, Long fromEpochMs) {
+		DelayLine line = delayLinesByCall.get(call.callId);
+		if (line == null || !isConnected(call)) {
+			return Optional.empty();
+		}
+		DelayLine.HoldStart hold = line.startHold(fromEpochMs == null ? Long.MIN_VALUE : fromEpochMs);
+		if (line.isClosed()) {
+			return Optional.empty(); // 그 사이 통화가 끝났다
+		}
+		return Optional.of(hold);
+	}
+
+	/** 이번에 처음 켠 차단이면 상담원에게 알린다 */
+	private void notifyHoldStarted(Call call, DelayLine.HoldStart hold) {
+		if (!hold.wasHeld()) {
+			call.agent.connection.send(new ServerMessage.MuteHoldChanged(call.callId, true));
+		}
+	}
+
 	private synchronized void applyProtection(String callId, Function<CallProtection, CallProtection.Result> step) {
 		Call call = callsById.get(callId);
 		if (call != null && call.state == CallState.CONNECTED) {
@@ -563,7 +626,11 @@ public class CallCoordinator {
 		switch (result.action()) {
 			case NONE -> {
 			}
-			case AFTER_NOTICE -> play(call, announcements.afterNotice(), "폭언 후 안내");
+			case AFTER_NOTICE -> {
+				play(call, announcements.afterNotice(), "폭언 후 안내");
+				// 안내가 끝날 때까지는 차단을 풀지 않는다
+				call.holdUntilEpochMs = clock.millis() + announcements.afterNotice().durationMs();
+			}
 			case SESSION_END -> {
 				play(call, announcements.sessionEnd(), "세션 종료");
 				long waitMs = announcements.sessionEnd().durationMs() + TERMINATE_MARGIN_MS;
@@ -615,8 +682,10 @@ public class CallCoordinator {
 
 	/**
 	 * 통화 하나의 STT 결과 처리 (STT 연결 스레드에서 불린다).
-	 * 자막은 상담원에게 보내고, 위험 발화면 그 발화 시작부터 아직 상담원에게 나가지 않은 부분을 지우고 차단 유지를 켠 뒤
-	 * 상담원에게 한 번 알린다. 차단 유지는 상담원이 풀 때까지 이어진다. 발화 시작 시각을 모르면 대기 중인 음성 전부를 지운다.
+	 * 자막은 상담원에게 보내고, 욕설이 보이면 발화 중이라도 바로 그 발화 시작부터 아직 상담원에게 나가지 않은 부분을 지우고
+	 * 차단 유지를 켠다 (폭언 의심). 발화가 끝나면 최종 결과로 판단한다: 상담원을 향한 욕이면 폭언 1회로 세고,
+	 * 남이 한 욕을 전하는 말이거나 최종 결과에 욕이 없으면 오탐지로 자동 해제한다 (횟수 그대로).
+	 * 발화 시작 시각을 모르면 대기 중인 음성 전부를 지운다.
 	 */
 	private final class CallSttListener implements SttListener {
 
@@ -643,10 +712,70 @@ public class CallCoordinator {
 			}
 			sendIfConnected(call, agentConnection, new ServerMessage.Transcript(call.callId, transcript.utteranceId(),
 					transcript.text(), transcript.isFinal()));
-			riskDetector.detect(transcript.text(), transcript.isFinal()).ifPresent(match -> protect(transcript.utteranceId(), transcript.text(),
-					transcript.fromEpochMs(), transcript.toEpochMs(), match.riskType(), match.severity(), match.keyword()));
+			Optional<KeywordRiskDetector.Match> match = riskDetector.detect(transcript.text(), transcript.isFinal());
 			if (transcript.isFinal()) {
+				judge(transcript, match);
 				analyzeEmotion(transcript);
+			} else {
+				match.ifPresent(m -> suspect(transcript, m));
+			}
+		}
+
+		/** 말하는 도중 욕설이 보였다: 판단은 발화가 끝난 뒤로 미루고 일단 막는다 */
+		private void suspect(SttTranscript transcript, KeywordRiskDetector.Match match) {
+			synchronized (CallCoordinator.this) {
+				if (call.suspects.contains(transcript.utteranceId()) || call.agentCleared.contains(transcript.utteranceId())) {
+					return;
+				}
+								if (hold(transcript.utteranceId(), transcript.text(), transcript.fromEpochMs(), match.riskType(),
+						match.severity(), match.keyword())) {
+					String key = transcript.utteranceId();
+					call.suspects.add(key);
+					ringTimer.schedule(Duration.ofMillis(SUSPECT_TIMEOUT_MS), () -> expireSuspect(key));
+				}
+			}
+		}
+
+				/** 최종 결과가 끝내 오지 않은 의심을 거둔다 (센 적이 없으니 횟수는 그대로) */
+		private void expireSuspect(String key) {
+			synchronized (CallCoordinator.this) {
+				if (call.suspects.remove(key)) {
+					log.info("폭언 의심 만료: {} (최종 결과 없음)", call.callId);
+					releaseHoldIfClear(call);
+				}
+			}
+		}
+
+		/**
+		 * 발화가 끝났다. 상담원을 향한 욕이면 폭언으로 세고, 의심했지만 폭언이 아니면 오탐지로 자동 해제한다.
+		 * 상담원이 그 의심을 이미 오탐지로 풀었으면 세지 않는다. 판단이 끝나면 남은 이유가 없을 때 차단을 푼다.
+		 */
+		private void judge(SttTranscript transcript, Optional<KeywordRiskDetector.Match> match) {
+			String key = transcript.utteranceId();
+			synchronized (CallCoordinator.this) {
+				boolean suspected = call.suspects.remove(key);
+				if (call.agentCleared.remove(key) || !isConnected(call)) {
+					return;
+				}
+				long startMs = sinceConnected(call, transcript.fromEpochMs());
+				long endMs = sinceConnected(call, transcript.toEpochMs());
+				if (match.isPresent() && !match.get().reported()) {
+					KeywordRiskDetector.Match abuse = match.get();
+					if (!suspected && !hold(key, transcript.text(), transcript.fromEpochMs(), abuse.riskType(),
+							abuse.severity(), abuse.keyword())) {
+						return;
+					}
+					if (countsAsAbuse(transcript.fromEpochMs(), transcript.toEpochMs(), abuse.riskType())) {
+						applyProtection(call, protection -> protection.abuse(startMs, endMs, transcript.text(), abuse.keyword()));
+					}
+				} else if (suspected) {
+					log.info("폭언 의심 해제: {} {}", call.callId, match.isPresent() ? "제3자 발언" : "최종 결과에 욕설 없음");
+										String keyword = match.map(KeywordRiskDetector.Match::keyword).orElse(null);
+					long to = transcript.toEpochMs() != null ? transcript.toEpochMs() : clock.millis();
+					call.skipRiskUntilEpochMs = Math.max(call.skipRiskUntilEpochMs, to);
+					applyProtection(call, protection -> protection.dismissed(startMs, endMs, transcript.text(), keyword));
+				}
+				releaseHoldIfClear(call);
 			}
 		}
 
@@ -675,8 +804,9 @@ public class CallCoordinator {
 							onEmotion(result, startMs, endMs, transcript.text());
 						}
 					})
-					.exceptionally(e -> {
+										.exceptionally(e -> {
 						log.warn("감정 분석 실패: {} {}", call.callId, e.toString());
+						onEmotionFailed();
 						return null;
 					});
 		}
@@ -687,61 +817,88 @@ public class CallCoordinator {
 					return;
 				}
 				agentConnection.send(new ServerMessage.Emotion(call.callId, result.score(), result.agitated()));
+				// 격양이면 그 발화 중 아직 안 나간 부분부터 막고, 안정이면 격양 때문에 켠 차단을 푼다
+								// 상담원이 차단을 푼 뒤 도착한, 그 전에 끝난 발화의 격양은 다시 막지 않는다
+				if (result.agitated() && call.connectedAtEpochMs + endMs > call.skipRiskUntilEpochMs) {
+					Optional<DelayLine.HoldStart> hold = startAutoHold(call, call.connectedAtEpochMs + startMs);
+					hold.ifPresent(started -> notifyHoldStarted(call, started));
+					call.agitationHold = hold.isPresent();
+				} else {
+					call.agitationHold = false;
+				}
 				applyProtection(call, protection -> protection.emotion(result.agitated(), startMs, endMs, text));
+				releaseHoldIfClear(call);
 			}
 		}
 
+				/** 판단이 없으면 격양 차단을 남겨 두지 않는다 (다음 판단이 영영 안 올 수 있다) */
+		private void onEmotionFailed() {
+			synchronized (CallCoordinator.this) {
+				call.agitationHold = false;
+				releaseHoldIfClear(call);
+			}
+		}
+
+		/** STT의 위험 판단은 발화가 끝난 뒤 오므로 바로 판단한다: 상담원(또는 모름)을 향한 위험이면 막고 센 뒤 푼다 */
 		@Override
 		public void onRisk(SttRisk risk) {
-			if (isConnected(call)) {
-				protect("risk-" + risk.fromEpochMs() + "-" + risk.toEpochMs(), risk.text(), risk.fromEpochMs(),
-						risk.toEpochMs(), risk.riskType(), risk.severity(), null);
+			if (risk.target() != null && !risk.target().equals("AGENT") && !risk.target().equals("UNKNOWN")) {
+				return; // 민원인 본인·조직·제3자를 향한 말은 상담원 보호 대상이 아니다
+			}
+						synchronized (CallCoordinator.this) {
+				// 상담원이 오탐지로 풀었거나 오탐지로 판단한 구간의 늦은 판단은 무시한다
+				if (risk.fromEpochMs() <= call.skipRiskUntilEpochMs) {
+					return;
+				}
+				if (!isConnected(call) || !hold("risk-" + risk.fromEpochMs() + "-" + risk.toEpochMs(), risk.text(),
+						risk.fromEpochMs(), risk.riskType(), risk.severity(), null)) {
+					return;
+				}
+				if (countsAsAbuse(risk.fromEpochMs(), risk.toEpochMs(), risk.riskType())) {
+					applyProtection(call, protection -> protection.abuse(sinceConnected(call, risk.fromEpochMs()),
+							sinceConnected(call, risk.toEpochMs()), risk.text(), null));
+				}
+				releaseHoldIfClear(call);
 			}
 		}
 
+		/** STT 엔진의 차단 요청도 차단 이유 하나로 다룬다. 꺼도 다른 이유(상담원, 의심, 격양)가 남아 있으면 풀지 않는다 */
 		@Override
 		public void onHold(boolean on) {
-			if (isConnected(call) && setHold(call.callId, on).isPresent()) {
-				if (!on) {
-					call.protection.holdReleased();
+			synchronized (CallCoordinator.this) {
+				if (!isConnected(call)) {
+					return;
 				}
-				sendIfConnected(call, agentConnection, new ServerMessage.MuteHoldChanged(call.callId, on));
+				call.sttHold = on;
+				if (!on) {
+					releaseHoldIfClear(call);
+				} else if (!call.delayLine.isHold() && setHold(call.callId, true).isPresent()) {
+					agentConnection.send(new ServerMessage.MuteHoldChanged(call.callId, true));
+				}
 			}
 		}
 
 		/**
-		 * 처음 찾은 위험 발화면 그 발화 시작부터 아직 안 나간 부분을 지우고 차단 유지를 켠다.
-		 * 욕한 민원인은 다음 말도 폭언일 가능성이 높아, 상담원이 직접 풀 때까지 민원인 음성을 계속 막는다.
-		 * 같은 발화의 결과가 더 와도 다시 지우거나 켜지 않는다 (상담원이 푼 뒤 바로 다시 막히지 않게).
+		 * 위험 발화 하나에 처음이면 그 발화 시작부터 아직 안 나간 부분을 지우고 차단 유지를 켠 뒤 risk-detected를 보낸다.
+		 * 같은 발화로 다시 부르면 아무것도 하지 않는다 (상담원이 푼 뒤 같은 발화 결과로 바로 다시 막히지 않게).
+		 * 잠금 안에서 부른다.
+		 *
+		 * @return 이번에 새로 막았는지
 		 */
-		private void protect(String key, String text, Long fromEpochMs, Long toEpochMs, String riskType, String severity,
-				String keyword) {
+		private boolean hold(String key, String text, Long fromEpochMs, String riskType, String severity, String keyword) {
 			if (!notified.add(key)) {
-				return;
+				return false;
 			}
-			// 차단 시작과 폭언 등록을 한 잠금 안에서 해, 상담원의 오탐지 해제가 그 사이에 끼지 않게 한다
-			synchronized (CallCoordinator.this) {
-				DelayLine line = delayLinesByCall.get(call.callId);
-				if (line == null || !isConnected(call)) {
-					return;
-				}
-				DelayLine.HoldStart hold = line.startHold(fromEpochMs == null ? Long.MIN_VALUE : fromEpochMs);
-				if (line.isClosed()) {
-					return; // 그 사이 통화가 끝났다
-				}
-				// 발화 본문은 개인정보를 담을 수 있어 로그에는 유형과 찾은 단어만 남긴다
-				log.info("위험 발화 감지: {} {} {} '{}' (무음 {}프레임, 차단 유지)", call.callId, riskType, severity, keyword,
-						hold.muted());
-				agentConnection.send(new ServerMessage.RiskDetected(call.callId, key, text, riskType, severity, keyword,
-						hold.muted()));
-				if (!hold.wasHeld()) {
-					agentConnection.send(new ServerMessage.MuteHoldChanged(call.callId, true));
-				}
-				if (countsAsAbuse(fromEpochMs, toEpochMs, riskType)) {
-					applyProtection(call, protection -> protection.abuse(sinceConnected(call, fromEpochMs),
-							sinceConnected(call, toEpochMs), text, keyword));
-				}
+			Optional<DelayLine.HoldStart> hold = startAutoHold(call, fromEpochMs);
+			if (hold.isEmpty()) {
+				return false;
 			}
+			int muted = hold.get().muted();
+			// 발화 본문은 개인정보를 담을 수 있어 로그에는 유형과 찾은 단어만 남긴다
+			log.info("위험 발화 감지: {} {} {} '{}' (무음 {}프레임, 차단 유지)", call.callId, riskType, severity, keyword, muted);
+			agentConnection.send(new ServerMessage.RiskDetected(call.callId, key, text, riskType, severity, keyword, muted));
+			notifyHoldStarted(call, hold.get());
+			return true;
 		}
 
 		/**
@@ -775,10 +932,39 @@ public class CallCoordinator {
 		private RingTimer.Cancellable terminateTimer;
 		/** 민원인에게 재생 중인 안내 음성. 상담원 음성 전달 스레드가 읽으므로 volatile */
 		private volatile Playback announcement;
+		// 차단 유지를 켠 이유 (잠금 안에서만 쓴다)
+		/** 상담원이 REST로 켰다. 상담원이 끌 때까지 저절로 풀지 않는다 */
+		private boolean manualHold;
+		/** 판단을 기다리는 폭언 의심 발화 (utteranceId) */
+		private final Set<String> suspects = new HashSet<>();
+		/** 판단 전에 상담원이 오탐지로 푼 발화. 최종 결과가 와도 세지 않는다 */
+		private final Set<String> agentCleared = new HashSet<>();
+				/** 마지막 감정 판단이 격양이다 */
+		private boolean agitationHold;
+		/** STT 엔진이 hold로 켰다 */
+		private boolean sttHold;
+		/** 이 시각까지 끝난 구간의 늦은 위험·격양 판단으로는 다시 막지 않는다 (상담원 해제, 오탐지 판단) */
+		private long skipRiskUntilEpochMs;
+		/** 이 시각까지는 풀지 않는다 (폭언 후 안내 재생 중) */
+		private long holdUntilEpochMs;
+		private RingTimer.Cancellable releaseTimer;
 
 		private Call(String callId, ClientConnection citizen) {
 			this.callId = callId;
 			this.citizen = citizen;
+		}
+
+		/** 상담원이 차단을 풀었다: 자동 차단 이유를 모두 지운다. 판단 중이던 의심은 최종 결과가 와도 세지 않는다 */
+		private void clearAutoHolds() {
+			agentCleared.addAll(suspects);
+			suspects.clear();
+						agitationHold = false;
+			sttHold = false;
+			holdUntilEpochMs = 0;
+			if (releaseTimer != null) {
+				releaseTimer.cancel();
+				releaseTimer = null;
+			}
 		}
 
 		private boolean isAnnouncing() {
