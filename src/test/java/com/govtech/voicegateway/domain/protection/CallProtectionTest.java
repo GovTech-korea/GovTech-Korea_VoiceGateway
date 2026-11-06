@@ -35,13 +35,30 @@ class CallProtectionTest {
 	}
 
 	@Test
-	@DisplayName("IMMEDIATE면 안내 후 폭언 1회에 세션 종료이고, 카운터의 안내 후 허용 횟수는 1이다")
+		@DisplayName("IMMEDIATE면 안내 전 폭언이 허용 횟수에 닿을 때 폭언 후 안내 없이 바로 세션 종료이고, 그 뒤 폭언은 세지 않는다")
 	void immediate() {
-		CallProtection protection = protection(1, AfterNotice.IMMEDIATE, 5, 5);
+		CallProtection protection = protection(2, AfterNotice.IMMEDIATE, 5, 5);
 
-		assertThat(protection.abuse(0, 0, "시발", "시발").action()).isEqualTo(Action.AFTER_NOTICE);
+		assertThat(protection.abuse(0, 0, "시발", "시발").action()).isEqualTo(Action.NONE);
 		assertThat(protection.abuse(0, 0, "시발", "시발").action()).isEqualTo(Action.SESSION_END);
+		assertThat(protection.isTerminating()).isTrue();
+		assertThat(protection.abuse(0, 0, "시발", "시발")).isEqualTo(CallProtection.Result.NONE);
 		assertThat(protection.state().afterNoticeLimit()).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("폭언 의심 해제(dismissed)는 FALSE_POSITIVE 기록만 만들고 횟수는 그대로 둔다")
+	void dismissed() {
+		CallProtection protection = protection(5, AfterNotice.COUNT, 2, 5);
+
+		CallProtection.Result result = protection.dismissed(1_000, 2_000, "그 사람이 개자식이라고 했어요", "개자식");
+
+		assertThat(result.events()).singleElement().satisfies(event -> {
+			assertThat(event.kind()).isEqualTo(EventKind.FALSE_POSITIVE);
+			assertThat(event.eventId()).isEqualTo("call-1-e1");
+		});
+		assertThat(result.action()).isEqualTo(Action.NONE);
+		assertThat(protection.state().abuseCount()).isZero();
 	}
 
 	@Test
